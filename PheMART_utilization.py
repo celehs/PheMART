@@ -1,1668 +1,1920 @@
-#!/usr/bin/env python
-# coding: utf-8
-
-# In[1]:
-
-from sklearn.metrics import auc, precision_score, recall_score, accuracy_score, confusion_matrix, f1_score, \
-    roc_auc_score, average_precision_score, precision_recall_curve
+import os.path
 import numpy as np
 import pandas as pd
-import csv
 import random
-import logging, os
-from tensorflow.keras import layers, models
-import tensorflow as tf
-from sklearn import metrics
-from a_utilization_beforeAE_joint_ppi_interface_VC import loaddata
-import scipy.stats as ss
 import time
-import argparse
-tf.keras.backend.set_floatx('float32')
-
-# os.environ["TF_GPU_ALLOCATOR"]="cuda_malloc_async"
-
-def parse_arguments(parser):
-    """Read user arguments"""
-    parser.add_argument('--flag_reload', type=int, default=0,
-                        help='0-1 to denote if reload the model')
-    parser.add_argument('--flag_modelsave', type=int, default=0,
-                        help='0-1 to denote if save the model')
-    parser.add_argument('--epochs', type=int, default=60,
-                        help='epochs')
-    parser.add_argument('--flag_debug', type=int, default=0,
-                        help='flag to indicate debug')
-    parser.add_argument('--flag_negative_filter', type=int, default=1,
-                        help='flag for negative_filter')
-    parser.add_argument('--train_ratio', type=float, default=0.9,
-                        help='train_ratio')
-    parser.add_argument('--latent_dim', type=int, default=80,
-                        help='embedding dim')
-    parser.add_argument('--batch_size', type=int, default=512,
-                        help='batch_size')
-    parser.add_argument('--learning_rate', type=float, default=0.0006,
-                        help='learning_rate')
-    parser.add_argument('--weight_cosine', type=float, default=5.0,
-                        help='weight_cosine')
-    parser.add_argument('--weight_vae', type=float, default=0.3,
-                        help='weight_vae')
-    parser.add_argument('--weight_distill', type=float, default=0.1,
-                        help='weight_distill')
-    parser.add_argument('--weight_unlabel_snps', type=float, default=0.2,
-                        help='weight_unlabel_snps')
-    parser.add_argument('--weight_CLIP', type=float, default=0.8,
-                        help='weight_CLIP')
-    parser.add_argument('--weight_CLIP_snps', type=float, default=0.5,
-                        help='weight_CLIP_snps')
-    parser.add_argument('--weight_CLIP_cui', type=float, default=0.5,
-                        help='weight_CLIP_cui')
-    parser.add_argument('--negative_disease', type=int, default=100,
-                        help='number of negative_disease')
-    parser.add_argument('--negative_snps', type=int, default=100,
-                        help='number of sampled negative_snps')
-    parser.add_argument('--margin_same', type=float, default=0.1,
-                        help='margin_same')
-    parser.add_argument('--margin_ppi', type=float, default=0.0,
-                        help='margin_ppi')
-    parser.add_argument('--margin_differ', type=float, default=-0.2,
-                        help='margin_differ')
-    parser.add_argument('--tau_softmax', type=float, default=0.1,
-                        help='tau_softmax for CLIP')
-    parser.add_argument('--flag_hard_negative', type=int, default=1,
-                        help='if using flag_hard_negative')
-    parser.add_argument('--model_savename', type=str,default="interaction_dim72_negative_mining",
-                        help='model name to save ')
-    parser.add_argument('--flag_save_unlabel_emb', type=int, default=0,
-                        help='if predict and save unlabeled snps embeddings')
-    parser.add_argument('--flag_cross_cui', type=int, default=0,
-                        help='if flag_cross_cui validation')
-    parser.add_argument('--flag_cross_gene', type=int, default=0,
-                        help='if cross-gene validation')
-    parser.add_argument('--content_unlabel', type=str, default="UDN",
-                        help='what unlabel SNPs to predict')
-    parser.add_argument('--flag_save_unlabel_predict', type=int, default=1,
-                        help='if predict and save unlabeled snps predictions')
-    parser.add_argument('--savename_unlabel_predict', type=str, default="snps_prediction_unlabeled_all.csv",
-                        help='filename to save unlabeled snps predictions')
-    parser.add_argument('--dirr_results_main', type=str, default="results/",
-                        help='Directory of to save results ')
-    parser.add_argument('--dirr_save_model', type=str, default="Model_save/",
-                        help='Directory of to save models ')
-    parser.add_argument('--dirr_results', type=str, default="/trait_dim72/",
-                        help='Directory to save results including embedings of train/test/unlabelel and unlabled predictions')
-    parser.add_argument('--filename_eval', type=str,default="result_trait_dim72.txt",
-                        help='filename to save the prediction evaluations')
-    args = parser.parse_args()
-    return args
+from sklearn.metrics.pairwise import cosine_similarity
+dirr = "/n/data1/hsph/biostat/celehs/lab/junwen/SNPs_codes/datasets/"
+label_file = "Clivar_snps_disease_Pathogenic_Likely_4_11_0410_trait_with_ALL_no_thers_1024.csv"    #the file with all the labeled snps
+file_CUI_covered = "CUIs_all_covered_CODER_0410_4749_noOTHERS.csv" #the file with all the CUIs
+file_label_as_pathogenic = "Clivar_snps_disease_PathogenicALL_Likely_4_11_0410.csv" 
+file_PPI_labels = "PrimeKG.csv" #the file with all the PPIs
+file_pathway = "PrimeKG.csv" #the file with all the pathways
+file_coexpression = "gene_coexpression_gene2vec_dim_200_iter_9.txt" #the file with all the coexpression
+disease_file_embedding_EHR = "Epoch_1000_L1_L2_3layer_MGB_VA_emb_embeddings_coder_clinvar_traits_cui_mapped_ALL_0410_with_all_renamed_withCUI_noOthers.csv" #the file with all the diseases's ERH embeddings
+disease_file_embedding_LLM = "embeddings_coder_clinvar_traits_cui_mapped_ALL_0410_with_all_renamed_withCUI_noOthers.csv" #the file with all the diseases's LLM embeddings
+snps_label_file = "labeled_230201_clinvar.csv"
+snps_label_file_embedding = "labeled_230201_clinvar_embedding.npy"
+snps_label_file_miss = "snps_miss_without_snp_embedding_filter.csv"
+snps_label_file_embedding_miss = "snps_miss_without_snp_embedding_filter_embedding_seq.npy"
+snps_unlabel_file = "unlabeled_230201_clinvar.csv"
+snps_unlabel_file_embedding = "unlabeled_230201_clinvar_embedding.npy"
+file_emb_wild = "wildtype_embeddings.csv"
+file_emb_wild_unipro = "uniprotid_gene_seq_embed.csv"
+file_map_snps_wild_l = "clinvar_missense.csv"
+file_map_snps_wild_l_0411 = "clinvar_missense_labeled_4_11.csv"
+file_map_snps_wild_u = "clinvar_missense_unlabeled.csv"
+file_benign = "Clivar_snps_disease_benign_Likely_4_11_0410.csv"
+file_gene_save_mapped = "Mapping_snps_genes.csv"
+file_gene_save_all = "All_genes.csv"
+file_hpo_embedding = "UDN_HPO_term_ALL_with_name_embedding_coder.csv"
+file_gene_negative = "neg_seq_100.csv"
+PPI_number_threshold = 10
+test_number = 10000000
+###########Gene negativer protein embedding #############################snps embedding ##################
 
 
-PARSER = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-ARGS = parse_arguments(PARSER)
-flag_reload=ARGS.flag_reload  #False
-flag_modelsave=ARGS.flag_modelsave  #False
-epochs=ARGS.epochs   #   55
-latent_dim=ARGS.latent_dim   # 72
-batch_size=ARGS.batch_size   #  512
-learning_rate=ARGS.learning_rate   #  0.0006
-weight_cosine=ARGS.weight_cosine   #  1.0
-weight_vae= ARGS.weight_vae   #  0.3
-weight_unlabel_snps=ARGS.weight_unlabel_snps   #   0.2
-weight_CLIP=ARGS.weight_CLIP   #  0.5
-train_ratio=ARGS.train_ratio   #   0.9
-content_unlabel=ARGS.content_unlabel
-flag_negative_filter=ARGS.flag_negative_filter
-flag_cross_gene=ARGS.flag_cross_gene
-flag_cross_cui=ARGS.flag_cross_cui
-
-negative_disease=ARGS.negative_disease   #   100
-negative_snps=ARGS.negative_snps   #  100
-margin_same=ARGS.margin_same   #  0.8
-margin_differ=ARGS.margin_differ   #   -0.2
-weight_CLIP_snps=ARGS.weight_CLIP_snps   #     0.25
-weight_CLIP_cui= ARGS.weight_CLIP_cui   #   0.75
-tau_softmax=ARGS.tau_softmax   #   0.1
-
-flag_hard_negative=ARGS.flag_hard_negative   #  1
-flag_debug=ARGS.flag_debug
-
-model_savename=ARGS.model_savename   # "Interaction_CODER_semi_align"
-flag_save_unlabel_emb=ARGS.flag_save_unlabel_emb   # "Interaction_CODER_semi_align"
-flag_save_unlabel_predict=ARGS.flag_save_unlabel_predict   # "Interaction_CODER_semi_align"
-savename_unlabel_predict=ARGS.savename_unlabel_predict   # "Interaction_CODER_semi_align"
-dirr_save_model= ARGS.dirr_save_model #       "Model_save/"
-dirr_results_main=ARGS.dirr_results_main
-filename_eval=ARGS.filename_eval
-
-weight_distill=ARGS.weight_distill
-margin_ppi=ARGS.margin_ppi
-
-
-scale_AE= 50.0   #   50.0
-weight_kl=0.0  #   0.0
-time_preprocessing=0
-epoch_show = 3
-epoch_MRR=500
-if ARGS.epochs<3:
-    learning_rate=0.0000001
-optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
-
-
-if not os.path.exists(dirr_results_main):
-    os.mkdir(dirr_results_main)
-dirr_results=ARGS.dirr_results
-if not os.path.exists(dirr_results):
-    os.mkdir(dirr_results)
-dirr_results=ARGS.dirr_results+"run_"+str(random.randint(0,10000))+"/"
-if not os.path.exists(dirr_results):
-    os.mkdir(dirr_results)
-
-dirr_results_prediction=dirr_results+"predictions_SNPs/"
-if not os.path.exists(dirr_results_prediction):
-    os.mkdir(dirr_results_prediction)
-
-dirr="/n/data1/hsph/biostat/celehs/lab/junwen/SNPs_codes/datasets/"
-file_CUIs_target="CUIs_all_covered_CODER_0410_4749_noOTHERS_save.csv"
-file_CUIs_target_UDN="HPO_terms_validation_all_reporteded.csv"
-label_file="Clivar_snps_disease_Pathogenic_Likely_4_11_0410_trait_with_ALL_no_thers_1024.csv"
-file_label_all="clinvar_missense_labeled_4_11.csv"
-snps_label_file="labeled_230201_clinvar.csv"
-snps_label_file_miss="snps_miss_without_snp_embedding_filter.csv"
-snps_label_file_embedding_miss="snps_miss_without_snp_embedding_filter_embedding_seq.npy"
-file_coexpression="gene_coexpression_gene2vec_dim_200_iter_9.txt"
-file_emb_wild_unipro="uniprotid_gene_seq_embed.csv"
-snps_label_file_embedding="labeled_230201_clinvar_embedding.npy"
-disease_file_embedding="embeddings_coder_clinvar_traits_cui_mapped_ALL_0410_with_all_renamed_withCUI_noOthers.csv" # node_disease_CUI_mapped_CUI_embedding.npy
-disease_file_embedding_EHR="Epoch_1000_L1_L2_3layer_MGB_VA_emb_embeddings_coder_clinvar_traits_cui_mapped_ALL_0410_with_all_renamed_withCUI_noOthers.csv"
-# node_disease_CUI_mapped_CUI_embedding.csv node_disease_CUI_mapped_sapbert.csv
-file_emb_wild="wildtype_embeddings.csv"
-file_snps_gene_map="Mapping_snps_genes.csv"
-snps_unlabel_file="unlabeled_230201_clinvar.csv"
-snps_unlabel_file_embedding="unlabeled_230201_clinvar_embedding.npy"
-clinvar_missense="clinvar_missense_labeled_4_11.csv"
-file_pathogenic_no_traits="Clinar_missense_pathogenic_no_traits.csv"
-genes_omim=set(list(pd.read_csv(dirr+"omim_clinvar_diff.csv")["gene"]))
-file_hpo_embedding="UDN_HPO_term_ALL_with_name_embedding_coder.csv"
-file_snps_gwas="GWAS_missense_label_HGv_no_overlap.csv"
-snps_gwas=list(pd.read_csv(dirr+file_snps_gwas)["HGV"])
-print ("snps_gwas:  len: ",len(snps_gwas))
-
-genes_OMIM=list(pd.read_csv(dirr+"omim_cui_mapping_coderpp_refine_sorted_subset.csv")["gene"])
-print("-----------------------genes_OMIM len:  ",len(set(genes_OMIM)))
-genes_OMIM_noClinVar=list(pd.read_csv(dirr+"omim_cui_mapping_coderpp_refine_sorted_qiao_no_clinvar.csv")["gene"])
-print("-----------------------genes_OMIM_noClinVar len:  ",len(set(genes_OMIM_noClinVar)))
-
-file_snps_UDN="UDN_SNP_disease_relation_split_embedding.csv"
-df_UND=pd.read_csv(dirr+file_snps_UDN)
-columns=list(df_UND.columns)
-embedding_UDN_shipa=np.array(df_UND[columns[13:]])
-print("---embedding_UDN: ",embedding_UDN_shipa.shape)
-snps_UDN_shipa=list(df_UND["Name"])
-gene_name_UDN_shipa=list(df_UND["gene_name"])
-print ("------snps_UDN:  len: ",len(snps_UDN_shipa))
-
-file_snps_list_UDN="variant_12observation_count_thould0.csv"
-snps_UDN_additional=list(pd.read_csv(dirr+file_snps_list_UDN)["clinvar_name"])
-
-df = pd.read_csv(dirr+file_label_all)
-dic_snp_year={}
-if "year_"in content_unlabel:
-    year_target=str(content_unlabel).split("_")[1]
-    for  snps,sig in zip(df["Name"],df["Clinical significance (Last reviewed)"]):
-        snps=str(snps).strip()
-        sig=str(sig).strip()
-        if str(sig)[-5:-1]==year_target:
-            dic_snp_year[snps]=1
-    print("----------------dic_snp_year: ",len(dic_snp_year),"  -year_target: ",year_target)
-
-dic_HPO_CUI_valid={}
-
-dic_snps_cui={}
-dic_cui_snps={}
-dic_cui_emb={}
-dic_snps_emb={}
-dic_snpsname_emb={}
-dic_snpsname_emb_un={}
-dic_snps_index = {}
-dic_index_snps={}
-dic_snps_gene={}
-dic_snpsindex_gene={}
-
-df=pd.read_csv(dirr+clinvar_missense)
-SNPs_clinvar_missense=list(df["Name"])
-SNPs_clinvar_missense=list({}.fromkeys(SNPs_clinvar_missense).keys())
-print ("--------------SNPs_clinvar_missense len: ", len(SNPs_clinvar_missense))
-df=pd.read_csv(dirr+file_pathogenic_no_traits)
-Clinar_missense_pathogenic_no_traits=set(list(df["snp"]))
-
-dic_gene_corexpression={}
-lines=open(dirr+file_coexpression).readlines()
-print("lines",len(lines))
-embedding_all_gene_expression=[]
+dic_gene_corexpression = {}
+lines = open(dirr + file_coexpression).readlines()
+print("lines", len(lines))
+embedding_all = []
 for line in lines:
-    line=line.strip()
-    gene=line.split()[0]
-    vec=np.array([float(x) for x in line.split()[1:]])
-    dic_gene_corexpression[gene]=vec
-    embedding_all_gene_expression.append(vec)
-print("---------------------dic_gene_corexpression",len(dic_gene_corexpression))
-genes_all_with_coexpression=list(dic_gene_corexpression.keys())
-print("embedding_all_gene_expression.shape: ",np.array(embedding_all_gene_expression).shape)
-
+    line = line.strip()
+    gene = line.split()[0]
+    vec = np.array([float(x) for x in line.split()[1:]])
+    dic_gene_corexpression[gene] = vec
+    embedding_all.append(vec)
+print("---------------------dic_gene_corexpression", len(dic_gene_corexpression))
+genes_all_with_coexpression = list(dic_gene_corexpression.keys())
 
 ##################################gene embedding######
-dic_gene_emb={}
-df=pd.read_csv(dirr+file_emb_wild_unipro)
-genes=list(df["gene"])
-features_all=np.array(df[df.columns[2:]])
-print ("genes len: ",len(genes))
-print ("features_all shape: ",features_all.shape)
-
-gene_embedding_all=[]
-for rowi in range(len(genes)):
-    gene = str(genes[rowi]).strip()
-
-    dic_gene_emb[gene] = features_all[rowi, :]
-
-df=pd.read_csv(dirr+file_emb_wild)
-genes=list(df["gene"])
-features_all=np.array(df[df.columns[1:]])
-print ("genes len: ",len(genes))
-print ("features_all shape: ",features_all.shape)
-
+dic_gene_emb = {}
+df = pd.read_csv(dirr + file_emb_wild)
+genes = list(df["gene"])
+features_all = np.array(df[df.columns[1:]])
 for rowi in range(len(genes)):
     gene = str(genes[rowi]).strip()
     dic_gene_emb[gene] = features_all[rowi, :]
-
-
-print("-----------------------------------------------gene_embedding_all shape:-------------------------------- ",np.array(gene_embedding_all).shape)
-code_save=[]
+embedding_gene_all = []
+gene_list = []
 for gene in dic_gene_emb:
-    code_save.append(dic_gene_emb[gene])
-print("embedding mean file_emb_wild_unipro: ",np.mean(features_all))
-print("---gene embedding all  mean: ",np.mean(np.array(code_save)))
+    embedding_gene_all.append(dic_gene_emb[gene][0:768])
+    gene_list.append(gene)
+embedding_gene_all = np.array(embedding_gene_all)
+similarity_matrix = -cosine_similarity(embedding_gene_all, embedding_gene_all)
+dic_gene_negatives = {}
+for rowi in range(len(gene_list)):
+    gene = gene_list[rowi]
+    sorted_indices = np.argsort(similarity_matrix[rowi, :])
+    for index in sorted_indices:
+        if not index == rowi:
+            gene_negative = gene_list[index]
+            dic_gene_negatives.setdefault(gene, []).append(gene_negative)
 
-print("------------------------------------------------------dic_gene_emb all:------------------------------- ",len(dic_gene_emb))
 ###########################################
+dic_snps_gene = {}
+dic_gene_snps = {}
+dic_gene_label = {}
+###############################################################
+df = pd.read_csv(dirr + file_map_snps_wild_l)
+SNPs = list(df["Name"])
+genes = list(df["Gene(s)"])
+for snp, gene in zip(SNPs, genes):
+    splits = str(gene).split("|")
+    if len(splits) > 0:
+        for split in splits:
+            if split in dic_gene_emb:
+                dic_snps_gene[str(snp).strip()] = split
+                dic_gene_snps.setdefault(split, []).append(snp)
 
-##########################dic snps gene
-df=pd.read_csv(dirr+file_snps_gene_map)
-snps_save=df["snps"]
-gene_save=df["genes"]
-for snps,gene in zip(snps_save,gene_save):
-    dic_snps_gene[snps]=gene
-print ("dic_snps_gene len: ",len(dic_snps_gene))
+df = pd.read_csv(dirr + file_map_snps_wild_l_0411)
+SNPs = list(df["Name"])
+genes = list(df["Gene(s)"])
+for snp, gene in zip(SNPs, genes):
+    splits = str(gene).split("|")
+    if len(splits) > 0:
+        for split in splits:
+            if split in dic_gene_emb:
+                dic_snps_gene[str(snp).strip()] = split
+                dic_gene_snps.setdefault(split, []).append(snp)
+
+df = pd.read_csv(dirr + file_map_snps_wild_u)
+SNPs = list(df["Name"])
+genes = list(df["Gene(s)"])
+for snp, gene in zip(SNPs, genes):
+    splits = str(gene).split("|")
+    if len(splits) > 0:
+        for split in splits:
+            if split in dic_gene_emb:
+                dic_snps_gene[str(snp).strip()] = split
+                dic_gene_snps.setdefault(split, []).append(str(snp).strip())
+print("dic_snps_gene len: ", len(dic_snps_gene))
+
+snps_save = []
+gene_save = []
+for snps in dic_snps_gene:
+    snps_save.append(snps)
+    gene_save.append(dic_snps_gene[snps])
+
+df = pd.DataFrame({})
+df["snps"] = snps_save
+df["genes"] = gene_save
+df.to_csv(dirr + file_gene_save_mapped, index=False)
+
+df = pd.DataFrame({})
+df["genes"] = list({}.fromkeys(gene_save).keys())
+df.to_csv(dirr + file_gene_save_all, index=False)
+#############################################################
+dic_snps_cui = {}
+dic_cui_snps = {}
+dic_cui_emb = {}
+dic_snps_emb = {}
+dic_snps_index = {}
+###########snps embedding #############################snps embedding ##################
+embedding = np.load(dirr + snps_label_file_embedding)
+embedding = np.array(embedding)
+print("SNPs embedding shape: ", embedding.shape)
+df = pd.read_csv(dirr + snps_label_file)
+SNPs = list(df["Name"])
+print(" labeled SNPs: ", len(SNPs))
+dic_snps_no_gene_all = {}
+for rowi in range(len(SNPs)):
+    dic_snps_emb[str(SNPs[rowi])] = np.array(embedding[rowi, :])
+    if str(SNPs[rowi]) in dic_snps_gene:
+        if not dic_snps_gene[str(SNPs[rowi])] in dic_gene_emb:
+            dic_snps_no_gene_all[str(SNPs[rowi])] = 1
 
 
-##########################dic snps gene
-dic_gene_labeled={}
-df = pd.read_csv(dirr+label_file)
-snps_labeled_all=list({}.fromkeys(list(df["snps"])).keys())
-for index, snps in zip(df["snps_index"],df["snps"]):
-    snps=str(snps).strip()
-    if snps in dic_snps_gene:
-        gene = dic_snps_gene[snps]
-        dic_gene_labeled[gene] = 1
 
-        dic_snps_index[str(snps).strip()] = int(index)
-        dic_index_snps[int(index)]=str(snps).strip()
-print("snps_labeled_all labeled with diseases: ",len(snps_labeled_all))
-print("dic_gene_labeled len------all labeled genes : ",len(dic_gene_labeled),"-----------------")
+for gene in dic_gene_emb:
+    dic_snps_emb[gene] = dic_gene_emb[gene]
+####unlabeled snps
+embedding = np.load(dirr + snps_unlabel_file_embedding)
+embedding = np.array(embedding)
+print("unlabeled SNPs embedding shape: ", embedding.shape)
+df = pd.read_csv(dirr + snps_unlabel_file)
+SNPs = list(df["Name"])
+print(" unlabeled SNPs: ", len(SNPs))
+dic_snps_no_gene_all_unlabel = {}
 
+for rowi in range(len(SNPs)):
+    dic_snps_emb[str(SNPs[rowi])] = np.array(embedding[rowi, :])
+    if str(SNPs[rowi]) in dic_snps_gene:
 
-df=pd.read_csv(dirr+"udn_hpo2cui_mapping_0410.csv")
-hpos=df["hpo"]
-cuis=df["cui"]
-sims=df["sim"]
-for hpo, cui, sim, in zip(hpos,cuis,sims):
-    if float(sim)>0.8:
-        dic_HPO_CUI_valid[hpo]=cui
+        if not dic_snps_gene[str(SNPs[rowi])] in dic_gene_emb:
+            dic_snps_no_gene_all_unlabel[str(SNPs[rowi])] = 1
 
-CUIs_all_covered=list(pd.read_csv(dirr+file_CUIs_target)["CUIs"])
-df=pd.read_csv(dirr+"CUI_HPO_UMLS2021AB.csv")
-hpos=df["code"]
-cuis=df["cui"]
-for cui,hpo in zip(cuis,hpos):
-    if cui in CUIs_all_covered:
-        dic_HPO_CUI_valid[hpo]=cui
-print("--------------------------dic_HPO_CUI_valid len: ",len(dic_HPO_CUI_valid),"-----------------------")
+##########missed varaints
+embedding = np.load(dirr + snps_label_file_embedding_miss)
+embedding = np.array(embedding)
+df = pd.read_csv(dirr + snps_label_file_miss)
+SNPs = list(df["snp"])
+dic_snps_no_gene_all_miss = {}
 
+for rowi in range(len(SNPs)):
+    dic_snps_emb[str(SNPs[rowi])] = np.array(embedding[rowi, :])
+    if str(SNPs[rowi]) in dic_snps_gene:
+        if not dic_snps_gene[str(SNPs[rowi])] in dic_gene_emb:
+            dic_snps_no_gene_all_miss[str(SNPs[rowi])] = 1
+code_save = []
+for snp in dic_snps_emb:
+    code_save.append(dic_snps_emb[snp])
 
 
 ###########snps embedding #############################snps embedding ##################
-embedding=np.load(dirr+snps_label_file_embedding)
-embedding=np.array(embedding)
-print ("SNPs embedding shape labeled: ",embedding.shape)
-df = pd.read_csv(dirr+snps_label_file)
-SNPs=list(df["Name"])
-print (" labeled SNPs: ",len(SNPs))
-if not len(SNPs)==len(embedding):
-    print ("-----------------------------------------error: ",  "len(SNPs) unequal to len(embedding)--------------------------","error---------------")
-dic_snpsname_emb_binary={}
-dic_snpsname_emb_all={}
-dic_snpsname_emb_sameGENE={}
+df = pd.read_csv(dirr + file_label_as_pathogenic)
+snps_patho_all = set(list(df["snps"]))
+dic_snps_patho = {}
+for snp in snps_patho_all:
+    if snp in dic_snps_emb and snp in dic_snps_gene and dic_snps_gene[snp] in dic_gene_emb:
+        dic_snps_patho[snp] = 1
 
-for rowi in range(len(SNPs)):
-    snps_i=str(SNPs[rowi]).strip()
-    if  str(SNPs[rowi]).strip() in dic_snps_gene and dic_snps_gene[str(SNPs[rowi]).strip()] in dic_gene_emb:
-        gene=dic_snps_gene[snps_i]
-        dic_snpsname_emb_binary[str(SNPs[rowi]).strip()] = np.array(embedding[rowi, :])
-        dic_snpsname_emb_all[snps_i] = np.array(embedding[rowi, :])
+#####################benign SNPs#####################
+dic_gene_benign = {}
+df = pd.read_csv(dirr + file_benign)
+SNPs = list(df["snps"])
+dic_snps_benign = {}
+dic_gene_snps_benign = {}
+for snp in SNPs:
+    snps = str(snp).strip()
+    if snp in dic_snps_gene and snps in dic_snps_emb and dic_snps_gene[snp] in dic_gene_emb:
+        dic_gene_benign.setdefault(dic_snps_gene[snps], []).append(snp)
+        dic_snps_benign[snp] = 1
+        dic_gene_snps_benign.setdefault(dic_snps_gene[snps], []).append(snp)
+print("dic_gene_benign: ", len(dic_gene_benign))
 
-        if gene in dic_gene_labeled:
-            dic_snpsname_emb_sameGENE[snps_i]=1
-
-
-        if snps_i in dic_snps_index :
-            dic_snps_emb[dic_snps_index[str(SNPs[rowi]).strip()]]=np.array(embedding[rowi,:])
-            dic_snpsname_emb[str(SNPs[rowi]).strip()] = np.array(embedding[rowi, :])
-
-print("dic_snpsname_emb  binary labeled: ",len(dic_snpsname_emb))
-print ("dic_snpsname_emb_binary len: ",len(dic_snpsname_emb_binary))
-######unlabeled
-embedding=np.load(dirr+snps_unlabel_file_embedding)
-embedding=np.array(embedding)
-print ("SNPs embedding shape unlabeled: ",embedding.shape)
-df = pd.read_csv(dirr+snps_unlabel_file)
-SNPs=list(df["Name"])
-print (" unlabeled SNPs: ",len(SNPs))
-if not len(SNPs)==len(embedding):
-    print ("-----------------------------------------error: ",  "len(SNPs) unequal to len(embedding)--------------------------","error---------------")
-for rowi in range(len(SNPs)):
-    snps_i = str(SNPs[rowi]).strip()
-    if str(SNPs[rowi]).strip() in dic_snps_gene and dic_snps_gene[str(SNPs[rowi]).strip()] in dic_gene_emb:
-        gene = dic_snps_gene[snps_i]
-        if gene in dic_gene_labeled : #and gene in genes_omim:
-            dic_snpsname_emb_sameGENE[snps_i] = 1
-
-        dic_snpsname_emb_un[str(SNPs[rowi]).strip()] = np.array(embedding[rowi, :])
-        dic_snpsname_emb_all[str(SNPs[rowi]).strip()] = np.array(embedding[rowi, :])
-            #dic_snpsname_emb[str(SNPs[rowi]).strip()] = np.array(embedding[rowi, :])
+df = pd.read_csv(dirr + "ClinVar_alphamissense_scores_1225_2.csv")
+clinvar_name = list(df["clinvar_name"])
+alphamissense_class = list(df["alphamissense_class"])
+for snp, category in zip(clinvar_name, alphamissense_class):
+    if snp == snp and category == category and snp in dic_snps_gene and snp in dic_snps_emb and dic_snps_gene and \
+            dic_snps_gene[snp] in dic_gene_emb:
+        if "benign" in category:
+            dic_gene_benign.setdefault(dic_snps_gene[snp], []).append(snp)
+            dic_snps_benign[snp] = 1
+            dic_gene_snps_benign.setdefault(dic_snps_gene[snp], []).append(snp)
+        elif "pathogenic" in category:
+            if snp in dic_snps_emb and snp in dic_snps_gene and dic_snps_gene[snp] in dic_gene_emb:
+                dic_snps_patho[snp] = 1
+snps_patho_all = set(list(dic_snps_patho.keys()))
 
 
-###########missed varaints
-embedding=np.load(dirr+snps_label_file_embedding_miss)
-embedding=np.array(embedding)
-df = pd.read_csv(dirr+snps_label_file_miss)
-SNPs=list(df["snp"])
-
-if not len(SNPs)==len(embedding):
-    print ("-----------------------------------------error: ",  "len(SNPs) unequal to len(embedding)--------------------------","error---------------")
-for rowi in range(len(SNPs)):
-    snps_i = str(SNPs[rowi]).strip()
-    dic_snpsname_emb_all[str(SNPs[rowi])] = np.array(embedding[rowi, :])
-    if str(SNPs[rowi]) in dic_snps_gene and dic_snps_gene[str(SNPs[rowi]).strip()] in dic_gene_emb:
-        gene = dic_snps_gene[snps_i]
-        if gene in dic_gene_labeled : #and gene in genes_omim:
-            dic_snpsname_emb_sameGENE[snps_i] = 1
-
-code_save=[]
-for snp in dic_snpsname_emb_all:
-    code_save.append(dic_snpsname_emb_all[snp])
-print("embedding mean snps_label_file_embedding_miss: ",np.mean(embedding))
-print("---snps embedding all  mean: ",np.mean(np.array(code_save)))
-
-print ("dic_snpsname_emb_all len: ",len(dic_snpsname_emb_all))
-
-
-
-
-# print ("----dic_snps_emb len: ",len(dic_snps_emb),"-------")
-# print ("----dic_snpsname_emb_un len: ",len(dic_snpsname_emb_un))
-print ("------------dic_snpsname_emb_all len: ",len(dic_snpsname_emb_all))
-###########snps embedding #############################snps embedding ##################
-# SNPs_clinvar_missense=set(SNPs_clinvar_missense)
-# snps_all_un_prediction=set(list(dic_snpsname_emb_binary.keys()))  #-set(snps_labeled_all)
-# snps_all_un_prediction=snps_all_un_prediction.intersection(SNPs_clinvar_missense)
-# snps_all_un_prediction=snps_all_un_prediction.intersection(Clinar_missense_pathogenic_no_traits)
-
-
-print("-------------obtaining UDN snps embedding begin............")
-UDN_snps_same_gene=[]
-for rowi in range(len(snps_UDN_additional)):
-    snps_i = str(snps_UDN_additional[rowi]).strip()
-    if  snps_i in dic_snps_gene and dic_snps_gene[snps_i] in dic_gene_emb and snps_i in dic_snpsname_emb_all:
-        gene = dic_snps_gene[snps_i]
-        if gene in dic_gene_labeled:
-            UDN_snps_same_gene.append(snps_i)
-            #if gene in genes_omim:
-            dic_snpsname_emb_sameGENE[snps_i] = 1
-
-
-embedding_UDN_shipa=np.array(df_UND[columns[13:]])
-print("---embedding_UDN: ",embedding_UDN_shipa.shape)
-snps_UDN_shipa=list(df_UND["Name"])
-gene_name_UDN_shipa=list(df_UND["gene_name"])
-print ("------snps_UDN:  len: ",len(snps_UDN_shipa))
-
-dic_snp_UDN_shipa={}
-for rowi in range(len(snps_UDN_shipa)):
-    snps_i = str(snps_UDN_shipa[rowi]).strip()
-    gene_i=str(gene_name_UDN_shipa[rowi]).strip()
-    dic_snpsname_emb_all[snps_i] = np.array(embedding_UDN_shipa[rowi, :])
-    if not snps_i in dic_snps_gene:
-        dic_snps_gene[snps_i]=gene_i
-    if  dic_snps_gene[snps_i] in dic_gene_emb and gene_i in dic_gene_labeled:
-        dic_snp_UDN_shipa[snps_i]=1
-        dic_snpsname_emb_sameGENE[snps_i] = 1
-
-print("--------dic_snp_UDN_shipa len: ",len(dic_snp_UDN_shipa),"----------in labeled gene with embedding vectors")
-        # dic_snpsname_emb_un[str(snps_UDN[rowi]).strip()] = np.array(embedding_UDN[rowi, :])
-        # dic_snpsname_emb_all[str(snps_UDN[rowi]).strip()] = np.array(embedding_UDN[rowi, :])
-print("-------------obtaining UDN snps embedding end............")
-
-#
-# dic_gene_num_labeled={}
-# dic_gene_num_all={}
-# for snp in dic_snpsname_emb_sameGENE:
-#     gene=dic_snps_gene[snp]
-#     if snp in snps_labeled_all:
-#         dic_gene_num_labeled.setdefault(gene,[]).append(1)
-#     dic_gene_num_all.setdefault(gene, []).append(1)
-# gene_label_num=[]
-# gene_all_num=[]
-# genename_save=[]
-# for gene in dic_gene_num_all:
-#     genename_save.append(gene)
-#     if gene in dic_gene_num_labeled:
-#         gene_all_num.append(len(dic_gene_num_all[gene])-len(dic_gene_num_labeled[gene]))
-#         gene_label_num.append(len(dic_gene_num_labeled[gene]))
-#     else:
-#         gene_all_num.append(len(dic_gene_num_all[gene]))
-#         gene_label_num.append(0)
-# df=pd.DataFrame({})
-# df["gene"]=genename_save
-# df["number of variant labeled"]=gene_label_num
-# df["number of variant predict"]=gene_all_num
-# df.to_csv(dirr+"gene_snps_labeled_unlabeled_number_clinvar.csv",index=False)
-
-
-dic_snps_OMIM={}
-for snp in dic_snpsname_emb_sameGENE:
-    if dic_snps_gene[snp] in genes_OMIM:
-        dic_snps_OMIM[snp]=1
-
-dic_snps_OMIM_noClinVar={}
-for snp in dic_snpsname_emb_sameGENE:
-    if dic_snps_gene[snp] in genes_OMIM:
-        dic_snps_OMIM_noClinVar[snp]=1
-
-
-print("--------------dic_snps_OMIM: ",len(dic_snps_OMIM))
-##################predicting GWAS as unlabeled#######################
-snps_all_un_prediction=set(list(dic_snpsname_emb_sameGENE.keys()))
-
-snps_all_un_prediction=list(snps_all_un_prediction)
-random.shuffle(snps_all_un_prediction)
-snps_all_un_prediction=set(snps_all_un_prediction)
-print ("------snps_all_un_prediction: all SNPs in the labeled genes and omim to be predicted :  len: ",len(snps_all_un_prediction),"-----------")
-if content_unlabel == "ClinVar_all":
-    if flag_save_unlabel_predict > 0:
-        if not os.path.exists(dirr + model_savename+"_ClinVar_snps_to_predict_all_joint.csv") :
-            df = pd.DataFrame({})
-            df["snps"] = list(snps_all_un_prediction)
-            label_all = [1] * 50000
-            label0 = [0] * (abs(len(snps_all_un_prediction) - 50000))
-            label_all.extend(label0)
-
-            df["flag"] = label_all[0:len(snps_all_un_prediction)]
-            df.to_csv(dirr + model_savename+"_ClinVar_snps_to_predict_all_joint.csv", index=False)
-            snps_all_un_prediction = list(snps_all_un_prediction)[0:50000]
-            print("-------------ClinVar_predict_all to be predicted : ",len(snps_all_un_prediction), " begining from 0")
-        else:
-            df = pd.read_csv(dirr + model_savename+"_ClinVar_snps_to_predict_all_joint.csv")
-            snps_all_to_predict = list(df["snps"])
-            flags = list(df["flag"])
-            if 0 in flags:
-                index_begin = flags.index(0)
-                snps_all_un_prediction = snps_all_to_predict[index_begin:index_begin + 50000]
-
-                for j in range(50000):
-                    if index_begin + j < len(flags):
-                        flags[index_begin + j] = 1
-                df["flag"] = flags
-                df.to_csv(dirr +model_savename+"_ClinVar_snps_to_predict_all_joint.csv", index=False)
-                print("-------------ClinVar_snps_to_predict_all  to be predicted : ",len(snps_all_to_predict), " begining from : ", index_begin)
-            else:
-                index_begin=random.randint(0,len(snps_all_to_predict)-50000)
-                snps_all_un_prediction = snps_all_to_predict[index_begin:index_begin + 50000]
-elif content_unlabel == "UDN_CUI" or  content_unlabel == "UDN_HPO":
-    print("UDN_snps_same_gene:  ",len(UDN_snps_same_gene))
-    snps_shilpa = set(list(dic_snp_UDN_shipa.keys()))
-    snps_all_un_prediction = set(list(dic_snpsname_emb_all.keys()))  # -set(snps_labeled_all)
-    snps_shilpa=snps_shilpa.union(set(UDN_snps_same_gene))
-    snps_all_un_prediction=snps_all_un_prediction.intersection(snps_shilpa)
-    print("-------------snps_all_un_prediction to be predicted UDN CUI and shilpa: ", len(snps_all_un_prediction))
-elif "year_" in content_unlabel:
-    snps_year = set(list(dic_snp_year.keys()))  # -set(snps_labeled_all)
-    snps_all_un_prediction = snps_all_un_prediction.intersection(set(snps_year))
-elif "shilpa" in content_unlabel:
-    snps_shilpa = set(list(dic_snp_UDN_shipa.keys()))  # -set(snps_labeled_all)
-    snps_all_un_prediction = snps_all_un_prediction.intersection(set(snps_shilpa))
-    print("-------------snps_all_un_prediction of shilpa to be predicted : ",  len(snps_all_un_prediction))
-elif "OMIM" in content_unlabel:
-    if "OMIM_noClinVar" in content_unlabel:
-        snps_OMIM = set(list(dic_snps_OMIM_noClinVar.keys()))  # -set(snps_labeled_all)
-        snps_all_un_prediction = snps_all_un_prediction.intersection(set(snps_OMIM))
-        if flag_save_unlabel_predict>0:
-            if not os.path.exists(dirr+model_savename+"OMIM_noClinVar_snps_to_predict_joint.csv"):
-                df = pd.DataFrame({})
-                df["snps"]=list(snps_all_un_prediction)
-                label_all=[1]*50000
-                label0=[0]*(abs(len(snps_all_un_prediction)-50000))
-                label_all.extend(label0)
-
-                df["flag"]=label_all[0:len(snps_all_un_prediction)]
-                df.to_csv(dirr+model_savename+"OMIM_noClinVar_snps_to_predict_joint.csv",index=False)
-                snps_all_un_prediction=list(snps_all_un_prediction)[0:50000]
-                print("-------------snps_all_un_prediction of OMIM and noClinVar to be predicted : ",len(snps_all_un_prediction)," begining from 0")
-            else:
-                df=pd.read_csv(dirr+model_savename+"OMIM_noClinVar_snps_to_predict_joint.csv")
-                snps_all_to_predict=list(df["snps"])
-                flags = list(df["flag"])
-                if 0 in flags:
-                    index_begin=flags.index(0)
-                    snps_all_un_prediction=snps_all_to_predict[index_begin:index_begin+50000]
-
-                    for j in range(50000):
-                        if index_begin+j<len(flags):
-                            flags[index_begin+j]=1
-                    df["flag"]=flags
-                    df.to_csv(dirr + model_savename+"OMIM_noClinVar_snps_to_predict_joint.csv", index=False)
-                    print("-------------snps_all_un_prediction of OMIM and noClinVar to be predicted : ", len(snps_all_to_predict), " begining from : ",index_begin)
-                else:
-                    index_begin = random.randint(0, len(snps_all_to_predict) - 50000)
-                    snps_all_un_prediction = snps_all_to_predict[index_begin:index_begin + 50000]
-
-    else:
-        snps_OMIM = set(list(dic_snps_OMIM.keys()))  # -set(snps_labeled_all)
-        snps_all_un_prediction = snps_all_un_prediction.intersection(set(snps_OMIM))
-        print("-------------snps_all_un_prediction of OMIM to be predicted : ", len(snps_all_un_prediction))
-
-
-print ("------snps_all_un_prediction: all SNPs in the labeled genes and omim to be predicted :  len: ",len(snps_all_un_prediction),"----------valid----")
-
-###########disease embedding ##################
-df_ehr=pd.read_csv(dirr+disease_file_embedding_EHR)
-df=pd.read_csv(dirr+disease_file_embedding)
-embedding=np.array(df[df.columns[2:]])
-embedding_cui_all=[]
-print ("CUIs embedding shape: ",embedding.shape)
-CUIs = list(pd.read_csv(dirr+disease_file_embedding)["CUIs"])
-print (" labeled CUIs: ",len(CUIs))
-if not len(CUIs)==len(embedding):
-    print ("-----------------------------------------error: ",  "len(CUIs) unequal to len(embedding)--------------------------","error---------------")
+###########disease embedding ###########################################
+df_ehr = pd.read_csv(dirr + disease_file_embedding_EHR)
+df = pd.read_csv(dirr + disease_file_embedding_LLM)
+embedding = np.array(df[df.columns[2:]])
+embedding_cui_all = []
+print("CUIs embedding shape: ", embedding.shape)
+CUIs = list(pd.read_csv(dirr + disease_file_embedding_LLM)["CUIs"])
+print(" labeled CUIs: ", len(CUIs))
+if not len(CUIs) == len(embedding):
+    print("-----------------------------------------error: ",
+          "len(CUIs) unequal to len(embedding)--------------------------", "error---------------")
 for rowi in range(len(CUIs)):
-    cui=CUIs[rowi]
+    cui = CUIs[rowi]
     if cui in df_ehr:
-        embedding_EHR=np.array(df_ehr[cui])
-        dic_cui_emb[str(CUIs[rowi])] = np.concatenate((np.array(embedding[rowi]),embedding_EHR),axis=-1)
-        embedding_cui_all.append(np.concatenate((np.array(embedding[rowi]),embedding_EHR),axis=-1))
-print ("dic_cui_emb len: ",len(dic_cui_emb))
-dic_cui_emb["benign"] = np.min(np.array(embedding_cui_all),axis=0)  #np.zeros(shape=(len(embedding[0, :]),))  #   np.mean(embedding,axis=0)    #
-# dic_cui_emb["benign"] = np.min(embedding,axis=0)  #np.zeros(shape=(len(embedding[0, :]),))  #   np.mean(embedding,axis=0)    #
+        embedding_EHR = np.array(df_ehr[cui])
+        dic_cui_emb[str(CUIs[rowi])] = np.concatenate((np.array(embedding[rowi]), embedding_EHR), axis=-1)
+        embedding_cui_all.append(np.concatenate((np.array(embedding[rowi]), embedding_EHR), axis=-1))
+print("dic_cui_emb len: ", len(dic_cui_emb))
+dic_cui_emb["benign"] = np.min(np.array(embedding_cui_all),
+                               axis=0)  # np.zeros(shape=(len(embedding[0, :]),))  #   np.mean(embedding,axis=0)    #
 # dic_cui_emb["others"]=  np.max(embedding,axis=0) #np.ones(shape=(len(embedding[0, :]),))*0.5   #np.sum(embedding,axis=0)  #
 #
 
 
-print ("dic_cui_emb 222222222  len: ",len(dic_cui_emb))
+############labeled pairs######################
+df = pd.read_csv(dirr + label_file)
+pairs_valid = 0
+print("labeled pairs reported: ", len(df["snps"]))
+dic_snps_valid = {}
+dic_cui_valid = {}
+index_save = []
+dic_non_index = {}
+dic_snps_labeled = {}
+dic_snps_labeled_emb = {}
+dic_snps_no_gene_l = {}
+dic_snp_miss = {}
+dic_pair_miss = {}
+dic_snp_miss_emb = {}
+dic_snp_miss_gene = {}
+dic_snp_miss_gene_emb = {}
+dic_gene_labeled_number = {}
+total_labeled_num = 0
+for index, snps, cui in zip(df["snps_index"], df["snps"], df["cui"]):
+    snps = str(snps).strip()
+    dic_snps_index[str(snps)] = int(index)
+    dic_snps_labeled[snps] = 1
 
-##############hpo embedding###################
-# df=pd.read_csv(dirr+file_hpo_embedding)
-# embedding=np.array(df[df.columns[2:]])
-# CUIs = list(pd.read_csv(dirr+file_hpo_embedding)["HPO"])
-# if not len(CUIs)==len(embedding):
-#     print ("-----------------------------------------error: ",  "len(CUIs) unequal to len(embedding)--------------------------","error---------------")
-# for rowi in range(len(CUIs)):
-#     hpo=str(CUIs[rowi]).strip()
-#     if hpo in dic_HPO_CUI_valid and dic_HPO_CUI_valid[hpo] in dic_cui_emb:
-#         dic_cui_emb[hpo] = dic_cui_emb[dic_HPO_CUI_valid[hpo]]
-#     else:
-#         dic_cui_emb[hpo] = np.array(embedding[rowi, :])
-# print ("dic_cui_emb with HPO len: ",len(dic_cui_emb))
+    if snps in dic_snps_gene:
 
-###########disease embedding ##################
+        if not dic_snps_gene[str(snps).strip()] in dic_gene_emb:
+            dic_snps_no_gene_l[str(snps).strip()] = 1
+    if snps in dic_snps_emb:
+        dic_snps_labeled_emb[snps] = 1
+    if snps in dic_snps_emb and cui in dic_cui_emb and snps in dic_snps_gene:
+        total_labeled_num += 1
+        dic_gene_label[dic_snps_gene[snps]] = 1
+        dic_snps_cui.setdefault(str(snps), []).append(str(cui))
+        dic_cui_snps.setdefault(str(cui), []).append(str(snps))
+        pairs_valid += 1
+        dic_snps_valid[snps] = 1
+        dic_cui_valid[cui] = 1
 
-train_loss = tf.keras.metrics.Mean(name='train_loss')
-train_loss_CLIP = tf.keras.metrics.Mean(name='train_loss_CLIP')
-train_loss_ppi = tf.keras.metrics.Mean(name='train_loss_ppi')
-train_ACC = tf.keras.metrics.Accuracy(name='train_ACC')
-train_AUC = tf.keras.metrics.AUC(name='train_AUC', curve='ROC')
-valid_loss = tf.keras.metrics.Mean(name='valid_loss')
-VAE_loss = tf.keras.metrics.Mean(name='VAE_loss')
-valid_ACC = tf.keras.metrics.Accuracy(name='valid_ACC')
-valid_AUC = tf.keras.metrics.AUC(name='valid_AUC', curve='ROC')
-valid_F1 = tf.keras.metrics.Mean(name='valid_F1')
-valid_PRC = tf.keras.metrics.AUC(name='valid_PRC', curve='PR')
-
-
-def reparameterize( mean, logvar):
-    eps = tf.random.normal(shape=(batch_size,latent_dim))
-    return eps * tf.exp(logvar * .5) + mean
-
-def log_normal_pdf(sample, mean, logvar, raxis=1):
-  log2pi = tf.math.log(2. * np.pi)
-  return tf.reduce_sum( -.5 * ((sample - mean) ** 2. * tf.exp(-logvar) + logvar + log2pi), axis=raxis)
-
-def guassian_kernel(source, target, kernel_mul=2.0, kernel_num=5, fix_sigma=None):
-    n_s=tf.shape(source)[0]
-    n_s=64 if n_s is None else n_s
-    n_t= tf.shape(target)[0]
-    n_t=64 if n_t is None else n_t
-    n_samples =n_s+n_t
-    total = tf.concat([source, target], axis=0)                                    #   [None,n]
-    total0 = tf.expand_dims(total,axis=0)               #   [1,b,n]
-    total1 = tf.expand_dims(total,axis=1)               #   [b,1,n]
-    L2_distance = tf.reduce_sum(((total0 - total1) ** 2),axis=2)     #   [b,b,n]=>[b,b]         #   [None,None,n]=>[128,128,1]
-    if fix_sigma:
-        bandwidth = fix_sigma
+        gene_l = dic_snps_gene[snps]
+        if not gene_l in dic_gene_labeled_number:
+            dic_gene_labeled_number[gene_l] = 1
+        else:
+            dic_gene_labeled_number[gene_l] += 1
     else:
-        bandwidth = tf.reduce_sum(L2_distance) / tf.cast(n_samples ** 2 - n_samples,tf.float32)
-    bandwidth /= kernel_mul ** (kernel_num // 2)
-    bandwidth_list = [bandwidth * (kernel_mul ** i) for i in range(kernel_num)]
-    kernel_val = [tf.exp(-L2_distance / bandwidth_temp) for bandwidth_temp in bandwidth_list]
-    return sum(kernel_val)  # /len(kernel_val)   #[b,b]
-
-def MMD(source, target, kernel_mul=2.0, kernel_num=10, fix_sigma=None):
-    kernels = guassian_kernel(source, target, kernel_mul=kernel_mul, kernel_num=kernel_num, fix_sigma=fix_sigma)
-    n_s=tf.shape(source)[0]
-    n_s=64 if n_s is None else n_s
-    n_t= tf.shape(target)[0]
-    n_t=64 if n_t is None else n_t
-    XX = tf.reduce_sum(kernels[:n_s, :n_s])/tf.cast(n_s**2,tf.float32)
-    YY = tf.reduce_sum(kernels[-n_t:, -n_t:])/tf.cast(n_t**2,tf.float32)
-    XY = tf.reduce_sum(kernels[:n_s, -n_t:])/tf.cast(n_s*n_t,tf.float32)
-    YX = tf.reduce_sum(kernels[-n_t:, :n_s])/tf.cast(n_s*n_t,tf.float32)
-    loss = XX + YY - XY - YX
-    return loss
-
-
-def Model_interaction(input_dim1=768,input_dim2=768+300,kl_weight=weight_kl,latent_dim=64,tau_KL=0.1):
-    input1_l = layers.Input(shape=(input_dim1,),dtype=tf.float32)
-    input1_l_p = layers.Input(shape=(input_dim1,), dtype=tf.float32)
-    input1_l_p_gene = layers.Input(shape=(input_dim1,), dtype=tf.float32)
-    input1_l_n = layers.Input(shape=(input_dim1,), dtype=tf.float32)
-    input1_l_n_gene = layers.Input(shape=(input_dim1,), dtype=tf.float32)
-
-
-    input2_l = layers.Input(shape=(input_dim2,),dtype=tf.float32)
-    input1_u = layers.Input(shape=(input_dim1,), dtype=tf.float32)
-    input1_u_gene = layers.Input(shape=(input_dim1,), dtype=tf.float32)
-    input2_u = layers.Input(shape=(input_dim2,), dtype=tf.float32)
-    input1_l_gene = layers.Input(shape=(input_dim1,), dtype=tf.float32)
-    input_gene_ppi_1 = layers.Input(shape=(input_dim1,), dtype=tf.float32)
-    input_gene_ppi_2 = layers.Input(shape=(input_dim1,), dtype=tf.float32)
-    encoder1_layer1 = layers.Dense(120, activation=tf.nn.leaky_relu, name="encoder1/fcn1",dtype='float32')
-    encoder1_layer1_residual = layers.Dense(120, activation=tf.nn.leaky_relu, name="encoder1/fcn1_residual",dtype='float32')
-    encoder1_layer1_residual_h1 = layers.Dense(120, activation=tf.nn.leaky_relu, name="encoder1/fcn1_residual_h1",dtype='float32')
-
-
-    encoder1_layer2_mean = layers.Dense(int(1.5*latent_dim), activation=tf.nn.leaky_relu, name="encoder1/fcn2/mean",dtype='float32')
-    encoder1_layer2_mean_gene = layers.Dense(int(1.5 * latent_dim), activation=tf.nn.leaky_relu, name="encoder1/fcn2/mean_gene", dtype='float32')
-    encoder1_layer2_var = layers.Dense(int(1.5*latent_dim), activation=tf.nn.leaky_relu, name="encoder1/fcn2/var",dtype='float32')
-    encoder1_layer31 = layers.Dense(latent_dim, activation=tf.nn.leaky_relu, name="encoder1/fcn31", dtype='float32')
-    encoder1_layer3= layers.Dense(latent_dim, activation=tf.nn.leaky_relu, name="encoder1/fcn3", dtype='float32')
-    encoder1_layer3_h1 = layers.Dense(latent_dim, activation=tf.nn.leaky_relu, name="encoder1/fcn3_h1", dtype='float32')
-
-    encoder1_layer31_gene = layers.Dense(latent_dim*2, activation=tf.nn.leaky_relu, name="encoder1/fcn31_gene", dtype='float32')
-
-    encoder1_layer1_gene = layers.Dense(180, activation=tf.nn.leaky_relu, name="encoder1/fcn1_gene", dtype='float32')
-
-
-    encoder1_gene_context_layer1 = layers.Dense(100, activation=tf.nn.leaky_relu, name="encoder1/gene_context_layer1", dtype='float32')
-    encoder1_gene_context_layer2 = layers.Dense(int(0.1 * latent_dim), activation=None, name="encoder1/gene_context_layer2", dtype='float32')
-
-    encoder1_layer30_coexpression = layers.Dense(220, activation=tf.nn.leaky_relu, name="encoder1/fc0_coexpression", dtype='float32')
-    encoder1_layer3_coexpression = layers.Dense(input_dim1, activation=None, name="encoder1/fc1_coexpression", dtype='float32')
-
-    encoder2_layer1_1 = layers.Dense(int(1.5*latent_dim), activation=tf.nn.relu, name="encoder2/fcn1",dtype='float32')
-    encoder2_layer1_2 = layers.Dense(int(48), activation=tf.nn.relu, name="encoder2/fcn1_2", dtype='float32')
-    encoder2_layer2_mean = layers.Dense(int(1.2*latent_dim), activation=tf.nn.leaky_relu, name="encoder2/fcn2/mean",dtype='float32')
-    encoder2_layer2_var = layers.Dense(int(1.2*latent_dim), activation=tf.nn.leaky_relu, name="encoder2/fcn2/var",dtype='float32')
-    encoder2_layer31 = layers.Dense(latent_dim, activation=tf.nn.leaky_relu, name="encoder2/fcn31",
-                                   dtype='float32')
-    encoder2_layer3 = layers.Dense(latent_dim, activation=tf.nn.leaky_relu, name="encoder2/fcn3", dtype='float32')
-
-    decoder1_layer_gene = layers.Dense(240, activation=tf.nn.leaky_relu, name="decoder1/layer_gene", dtype='float32')
-    decoder1_layer1 = layers.Dense(int(input_dim1*1.5), activation=tf.nn.leaky_relu, name="decoder1/fcn1",dtype='float32')
-    decoder1_layer2 = layers.Dense(input_dim1, activation=None, name="decoder1/fcn2",dtype='float32')
-
-    decoder1_layer1_gene = layers.Dense(int(input_dim1 * 1.5), activation=tf.nn.leaky_relu, name="decoder1/fcn1_gene",
-                                   dtype='float32')
-    decoder1_layer2_gene = layers.Dense(input_dim1, activation=None, name="decoder1/fcn2_gene", dtype='float32')
-
-    decoder2_layer1_2 = layers.Dense(int(300 * 1.5), activation=tf.nn.leaky_relu, name="decoder2/fcn1_2",dtype='float32')
-    decoder2_layer2_2 = layers.Dense(300, activation=None, name="decoder2/fcn2_2", dtype='float32')
-
-
-    decoder2_layer1 = layers.Dense(int(768*1.5), activation=tf.nn.leaky_relu, name="decoder2/fcn1",dtype='float32')
-    decoder2_layer2 = layers.Dense(768, activation=None, name="decoder2/fcn2",dtype='float32')
-    # M_interaction = tf.Variable(np.random.normal(0, 1, size=(latent_dim, latent_dim)), trainable=True, dtype=tf.float32, name="interaction_M")
-    def AE1(input,input_gene):         ####L2 loss
-        feature = encoder1_layer1(input)
-        feature_gene = encoder1_layer1(input_gene)
-        feature_residual = encoder1_layer1_residual(feature-feature_gene)
-        feature=feature+feature_residual
-        #feature=feature+encoder1_layer1_residual_h1(feature)
-
-
-        mean=encoder1_layer2_mean(feature)
-        fusioned=mean  #tf.concat([mean,gene_context],axis=1)
-
-        output=decoder1_layer1(mean)  ###using the mean to recontruct
-        output=decoder1_layer2(output)
-        # output = tf.cast(output, dtype=tf.float32)
-        MSE=tf.reduce_mean(tf.square(input*scale_AE-output))
-        # output = decoder1_layer_gene(mean)
-        output_gene = decoder1_layer1_gene(mean)  ###using the mean to recontruct
-        output_gene = decoder1_layer2_gene(output_gene)
-        # output = tf.cast(output, dtype=tf.float32)
-        MSE_gene = tf.reduce_mean(tf.square(input_gene* scale_AE - output_gene))
-        MSE=MSE+MSE_gene
-        return fusioned, MSE,mean
-    def AE2(input):  ####cross-entropy loss
-        feature_1 = encoder2_layer1_1(input[:, 0:768])
-        feature_2 = encoder2_layer1_2(input[:, 768:])
-
-        # feature_1 = tf.nn.dropout(feature_1, rate=0.1)
-        # feature_2 = tf.nn.dropout(feature_2, rate=0.1)
-
-        feature = tf.concat([feature_1, feature_2], axis=-1)
-        mean = encoder2_layer2_mean(feature)
-        # feature_out=encoder2_layer31(mean)
-        # feature_out = encoder2_layer3(mean)
-        # logvar = encoder2_layer2_var(feature)
-        # z = reparameterize(mean, logvar)
-        # logpz = log_normal_pdf(z, 0., 0.)
-        # logqz_x = log_normal_pdf(z, mean, logvar)
-        # kl = logpz - logqz_x
-        #mean_decoder = tf.nn.dropout(mean, rate=0.2)
-        output_1 = decoder2_layer1(mean)  ###using the mean to recontruct
-        output_1 = decoder2_layer2(output_1)
-        output_2 = decoder2_layer1_2(mean)  ###using the mean to recontruct
-        output_2 = decoder2_layer2_2(output_2)
-
-        # output = tf.cast(output, dtype=tf.float32)
-        MSE1 = tf.reduce_mean(tf.square(input[:, 0:768] * scale_AE - output_1))  # tf.keras.losses.binary_crossentropy(input, output)
-        MSE2 = tf.reduce_mean(tf.square(input[:, 768:] * scale_AE - output_2))
-        MSE = MSE1 + MSE2
-        return mean, MSE, mean  # MSE+kl_weight*kl
-
-
-
-    feature1_l_raw, loss_vae1_l, mean1_l = AE1(input1_l,input1_l_gene)
-    feature1_l_p, loss_vae1_l_p, mean1_l_p = AE1(input1_l_p, input1_l_p_gene)
-    feature1_l_n, loss_vae1_l_n, mean1_l_n = AE1(input1_l_n, input1_l_n_gene)
-
-    feature1_ppi_p, loss_vae1_ppi_p, mean1_ppi_p = AE1(input_gene_ppi_1,input_gene_ppi_2)
-
-    #gene2vector=encoder1_layer30_coexpression(feature1_l_gene_ppi_1)
-    feature2_l_mean, loss_vae2_l, mean2_l = AE2(input2_l)
-    #feature1_l_gene, loss_vae2_l_gene, mean2_l_gene = AE1(input1_l_gene)
-    #feature1_l_gene = encoder1_layer31_gene(feature1_l_gene)
-
-    feature1_l = encoder1_layer3(feature1_l_raw)
-    feature1_l=feature1_l+encoder1_layer3_h1(feature1_l)
-    feature2_l = encoder2_layer3(feature2_l_mean)
-
-    #feature1_l_gene_P, loss_vae2_l_gene_P, mean2_l_gene_P = AE1(input1_l_gene_P)
-    #feature1_l_gene_P = encoder1_layer31_gene(feature1_l_gene_P)
-    #feature1_l_gene_P = encoder1_layer1_gene(feature1_l_gene_P)
-
-    similarity_input = tf.matmul(input2_l, input2_l, transpose_b=True) / (
-                (tf.sqrt(tf.reduce_sum(tf.square(input2_l), axis=-1, keepdims=True))) * (
-            tf.sqrt(tf.reduce_sum(tf.square(input2_l), axis=-1, keepdims=True))))
-    similarity_feature2 = tf.matmul(feature2_l_mean, feature2_l_mean, transpose_b=True) / (
-            (tf.sqrt(tf.reduce_sum(tf.square(feature2_l_mean), axis=-1, keepdims=True))) * (
-        tf.sqrt(tf.reduce_sum(tf.square(feature2_l_mean), axis=-1, keepdims=True))))
-    print("similarity_feature2 1: ", similarity_feature2)
-    similarity_feature2 = tf.nn.softmax(similarity_feature2 / tau_KL, axis=1)
-    similarity_input = tf.nn.softmax(similarity_input / tau_KL, axis=1)
-    print("similarity_feature2 2: ", similarity_feature2)
-    distill_L1 = tf.reduce_mean(tf.reduce_sum(tf.square(similarity_input - similarity_feature2), axis=-1))
-    # loss_distill = tf.reduce_mean(tf.reduce_sum(similarity_input * tf.math.log(similarity_input / similarity_feature2), axis=-1) +
-    #        tf.reduce_sum(similarity_feature2 * tf.math.log(similarity_feature2 / similarity_input), axis=-1))
-    similarity_feature2 = tf.clip_by_value(similarity_feature2, 1e-10, 1.0)
-    similarity_input = tf.clip_by_value(similarity_input, 1e-10, 1.0)
-    loss_distill = tf.reduce_sum(similarity_feature2 * tf.math.log(similarity_feature2 / similarity_input), axis=-1)
-
-    output = (tf.reduce_sum(tf.multiply(feature1_l, feature2_l), axis=-1)) / (
-            tf.sqrt(tf.reduce_sum(tf.square(feature1_l), axis=-1)) * tf.sqrt( tf.reduce_sum(tf.square(feature2_l), axis=-1)))
-    # print("------------output: ", output)
-
-    if True:
-        feature1_u, loss_vae1_u, mean1_ppi_n = AE1(input1_u,input1_u_gene)
-        feature2_u, loss_vae2_u, mean2_u = AE2(input2_u)
-
-        loss_MMD = MMD(feature1_l_raw, feature1_u)
-        loss_vae = (loss_vae1_l  + loss_vae2_l) / 2.0 +weight_unlabel_snps*(loss_vae1_u  + loss_vae2_u) / 2.0 #+ loss_distill*weight_distill
-
-    # print("------------loss_vae: ",loss_vae)
-    # print("------------feature1_l: ", feature1_l)
-    # print("------------feature2_l: ", feature2_l)
-    model = models.Model(inputs=[input1_l,input2_l, input1_u,input1_u_gene, input2_u,input1_l_gene,input_gene_ppi_1,input_gene_ppi_2,
-                                 input1_l_p, input1_l_p_gene, input1_l_n, input1_l_n_gene],
-                         outputs=[output,loss_vae, feature1_l,feature2_l,feature1_ppi_p,feature1_u,feature1_l_raw,feature1_l_p,feature1_l_n])
-    return model
-
-
-def train_step(model,epoch_num, input_pro_tsr, input_dis_tsr,label,unlabel_snps,unlabel_snps_gene,
-               unlabel_disease,input_gene_emb,input_gene_ppi1_emb,input_gene_ppi2_emb,train_gene_weight,
-               input_pro_tsr_positive,input_pro_tsr_positive_gene,input_pro_tsr_negative,input_pro_tsr_negative_gene,train_gene_PPI_p1_weight):
-    # print("input_pro_tsr mean: ", np.mean(input_pro_tsr.numpy()))
-    # print("input_dis_tsr mean: ", np.mean(input_dis_tsr.numpy()))
-    # print("input_gene_emb mean: ", np.mean(input_gene_emb.numpy()))
-    # print("unlabel_snps mean: ", np.mean(unlabel_snps.numpy()))
-    # print("unlabel_snps_gene mean: ", np.mean(unlabel_snps_gene.numpy()))
-    # print("unlabel_disease mean: ", np.mean(unlabel_disease.numpy()))
-
-    labels_multi = tf.convert_to_tensor(np.arange(label.numpy().shape[0]))
-
-    train_gene_weight = 1.0 * label.numpy().shape[0] * train_gene_weight / np.sum(train_gene_weight.numpy())
-    train_gene_weight = tf.convert_to_tensor(train_gene_weight)
-    train_gene_weight = tf.cast(train_gene_weight, dtype=tf.float32)
-
-    batch_size_temp=label.numpy().shape[0]
-
-    with tf.GradientTape(persistent=True) as tape:
-        cce = tf.keras.losses.SparseCategoricalCrossentropy()
-        prediction,loss_vae,feature_snps,feature_cuis,feature1_l_gene_ppi_p,feature1_l_gene_ppi_n,feature_snp_mean,feature_snp_mean_p,feature_snp_mean_n=\
-            model([input_pro_tsr, input_dis_tsr, unlabel_snps,unlabel_snps_gene,unlabel_disease,input_gene_emb,input_gene_ppi1_emb,input_gene_ppi2_emb,
-                   input_pro_tsr_positive,input_pro_tsr_positive_gene,input_pro_tsr_negative,input_pro_tsr_negative_gene])
-
-        similarity_snp_p = (tf.reduce_sum(tf.multiply(feature_snp_mean, feature_snp_mean_p), axis=-1)) / (
-                    tf.sqrt(tf.reduce_sum(tf.square(feature_snp_mean), axis=-1)) * tf.sqrt(
-                tf.reduce_sum(tf.square(feature_snp_mean_p), axis=-1)))
-
-        similarity_snp_n = (tf.reduce_sum(tf.multiply(feature_snp_mean, feature_snp_mean_n), axis=-1)) / (
-                tf.sqrt(tf.reduce_sum(tf.square(feature_snp_mean), axis=-1)) * tf.sqrt(
-            tf.reduce_sum(tf.square(feature_snp_mean_n), axis=-1)))
-
-        distance_snp_postive = tf.maximum(0, 0.2 - similarity_snp_p)
-        distance_snp_negative = tf.maximum(0, similarity_snp_n - (-0.2))
-        loss_snp_contrast = tf.reduce_mean(distance_snp_postive + distance_snp_negative)
-
-
-
-        feature_snps = feature_snps / (tf.sqrt(tf.reduce_sum(tf.square(feature_snps), axis=-1, keepdims=True)))
-        feature_cuis = feature_cuis / (tf.sqrt(tf.reduce_sum(tf.square(feature_cuis), axis=-1, keepdims=True)))
-        feature_interaction = tf.matmul(feature_snps, feature_cuis, transpose_b=True)
-
-        similarity_PPI_p = (tf.reduce_sum(tf.multiply(feature_snp_mean, feature1_l_gene_ppi_p), axis=-1)) / ( tf.sqrt(tf.reduce_sum(tf.square(feature_snp_mean), axis=-1)) * tf.sqrt(tf.reduce_sum(tf.square(feature1_l_gene_ppi_p), axis=-1)))
-
-        similarity_PPI_n = (tf.reduce_sum(tf.multiply(feature_snp_mean, feature1_l_gene_ppi_n), axis=-1)) / (
-                tf.sqrt(tf.reduce_sum(tf.square(feature_snp_mean), axis=-1)) * tf.sqrt( tf.reduce_sum(tf.square(feature1_l_gene_ppi_n), axis=-1)))
-
-        # similarity_PPI_p=tf.reduce_mean(similarity_PPI_p)
-        # similarity_PPI_n=tf.reduce_mean(similarity_PPI_n)
-        loss_ppi = tf.maximum(similarity_PPI_n + margin_ppi - similarity_PPI_p, 0.0)*train_gene_PPI_p1_weight
-        loss_ppi= tf.reduce_mean(loss_ppi)
-
-        if epoch_num<epochs/3:
-            tau_softmax_adjust=1.0
-        else:
-            tau_softmax_adjust=1.0
-
-        if tau_softmax>0.5:
-            loss_snps = cce(labels_multi, tf.nn.softmax(tf.transpose(feature_interaction /tau_softmax), axis=-1))*train_gene_weight
-            loss_cui = cce(labels_multi, tf.nn.softmax(feature_interaction  / tau_softmax, axis=-1))*train_gene_weight
-        else:
-            loss_snps = cce(labels_multi, tf.nn.softmax(tf.transpose(feature_interaction* 2.0*tau_softmax_adjust  /tau_softmax), axis=-1))*train_gene_weight
-            loss_cui = cce(labels_multi, tf.nn.softmax(feature_interaction * tau_softmax_adjust / tau_softmax, axis=-1))*train_gene_weight
-
-        loss_CLIP_P = loss_snps * label * weight_CLIP_snps + loss_cui * label * weight_CLIP_cui
-        #loss_CLIP_N = loss_snps_N * (1 - label)  # * 0.9 + loss_cui_N * (1 - label) * 0.1
-        loss_CLIP = tf.reduce_mean(loss_CLIP_P )
-        loss_vae = tf.reduce_mean(loss_vae)
-
-
-        # distance_same = 1 - prediction
-        distance_same = tf.maximum( 0,  margin_same- prediction)
-        distance_differ = tf.maximum(0, prediction - margin_differ)
-        positive_ratio = (batch_size - tf.reduce_sum(label)) / (tf.reduce_sum(label) + 1)
-        if weight_cosine>=5:
-            loss =  tf.reduce_mean(train_gene_weight* ((batch_size - tf.reduce_sum(label))*label * distance_same*0.99 + (1 - label) * distance_differ*tf.reduce_sum(label) )/batch_size)
-        else:
-            loss = tf.reduce_mean(train_gene_weight*(1 - label) * distance_differ )
-
-        #loss = tf.reduce_mean( label * distance_same + (1 - label) * distance_differ)
-        prediction= tf.nn.sigmoid(prediction)
-        loss_vae=tf.reduce_mean(loss_vae)
-        if margin_ppi>0:
-            weight_ppi=[3.0,3.0,2.5]
-        else:
-            weight_ppi=[0.0,0.0,0.0]
-
-        if epoch_num < epochs / 3:
-            if epoch_num < 6:
-                loss_joint =loss_snp_contrast+weight_vae*loss_vae +loss_ppi *  weight_ppi[0]+loss*5.0
-            else:
-                loss_joint =loss_snp_contrast+weight_vae*loss_vae +loss_ppi *  weight_ppi[1]+loss_CLIP*0.1+loss*5.0
-        else:
-            loss_joint = weight_vae * loss_vae + loss_CLIP * weight_CLIP + loss_ppi *  weight_ppi[2]+loss_snp_contrast+loss*5.0
-
-    if epoch_num>0:
-        gradients = tape.gradient(loss_joint, model.trainable_variables)
-        optimizer.apply_gradients(grads_and_vars=zip(gradients, model.trainable_variables))
-
-    prediction_mean=np.mean(prediction.numpy())
-    if prediction_mean==prediction_mean:
-        train_loss.update_state(loss)
-        VAE_loss.update_state(loss_vae)
-        train_loss_CLIP.update_state(loss_CLIP)
-        train_loss_ppi.update_state(loss_ppi)
-        train_AUC.update_state(label, prediction)
-    return loss.numpy(),prediction.numpy(),label.numpy(),
-
-def valid_step(model, input_pro_tsr, input_dis_tsr, label,input_gene_emb):
-    prediction,loss_vae,feature_snps,feature_cuis,feature_ppi_1 ,feature_ppi_2,feature_snp_mean,feature_snp_mean_p,feature_snp_mean_n= \
-        model([input_pro_tsr, input_dis_tsr, input_pro_tsr, input_gene_emb,input_dis_tsr,
-               input_gene_emb,input_pro_tsr,input_gene_emb,input_pro_tsr,input_pro_tsr,input_pro_tsr,input_pro_tsr])
-    # prediction = tf.nn.sigmoid(prediction)
-    valid_AUC.update_state(label, tf.nn.sigmoid(prediction))
-    valid_PRC.update_state(label, tf.nn.sigmoid(prediction))
-
-
-    return label.numpy(), prediction.numpy()
-
-def train_model(model,ds_train, ds_test, eval_SNPs,eval_index,epochs,eval_SNPs_train,eval_cui_train,eval_gene_train,eval_gene_test):
-    print("--------begin training.....")
-    epoch_num = -1
-    auc_total = []
-    save_flag=False
-    #########################################for test######################################
-    while (epoch_num < epochs):
-        if epoch_num%epoch_MRR==10:
-            MRR=[]
-            rank_total=[]
-            dic_snps_recall10={}
-            dic_snps_recall50={}
-            print("-------------------------------------------------evaluate the top k accuracy-----------------------------------")
-
-            CUIs_all_covered=list(pd.read_csv(dirr+file_CUIs_target)["CUIs"])
-            print ("---CUIs_all_covered: ",len(CUIs_all_covered))
-
-            CUIs_embedding_test = []
-            add_num = batch_size - len(CUIs_all_covered) % batch_size
-            batch_size_test = len(CUIs_all_covered) + add_num
-            for cui in CUIs_all_covered:
-                CUIs_embedding_test.append(dic_cui_emb[str(cui)])
-            for addi in range(add_num):
-                CUIs_embedding_test.append(CUIs_embedding_test[random.randint(0, batch_size)])
-            CUIs_embedding_test = np.array(CUIs_embedding_test)
-            CUIs_embedding_test_input = tf.convert_to_tensor(CUIs_embedding_test, dtype=tf.float32)
-            snps_test = 0
-
-
-            batch_max = int(len(CUIs_embedding_test_input) / batch_size)
-            for snps_i in range(len(eval_SNPs)):
-                snps_index = eval_SNPs[snps_i]
-                snps = dic_index_snps[snps_index]
-
-                pair_snps_cui = str(snps_index) + "_snps_cui_" + str(eval_index[snps_i])
-                dic_snps_recall10[pair_snps_cui] = 0
-                dic_snps_recall50[pair_snps_cui] = 0
-
-                # dic_snps_recall10[snps_index] = 0
-                # dic_snps_recall50[snps_index] = 0
-                snps_test += 1
-                embedding_snps = dic_snpsname_emb_all[snps]
-                embedding_snps = np.tile(embedding_snps, (batch_size_test, 1))
-                embedding_snps_input = tf.convert_to_tensor(embedding_snps, dtype=tf.float32)
-
-                embedding_gene = dic_gene_emb[dic_snps_gene[snps]]
-                embedding_gene = np.tile(embedding_gene, (batch_size_test, 1))
-                embedding_gene_input = tf.convert_to_tensor(embedding_gene, dtype=tf.float32)
-
-
-                prediction_all = []
-                feature_snps_all = []
-                feature_cuis_all = []
-                for batch_i in range(batch_max):
-                    prediction, loss_vae, feature_snps, feature_cuis,feature_temp1_,feature_temp2_,feature_snp_mean,_,_ = model(
-                        [embedding_snps_input[batch_i * batch_size:(batch_i + 1) * batch_size, :],
-                         CUIs_embedding_test_input[batch_i * batch_size:(batch_i + 1) * batch_size, :],
-                         embedding_snps_input[batch_i * batch_size:(batch_i + 1) * batch_size, :],
-                         embedding_gene_input[batch_i * batch_size:(batch_i + 1) * batch_size, :],
-                         CUIs_embedding_test_input[batch_i * batch_size:(batch_i + 1) * batch_size, :],
-                         embedding_gene_input[batch_i * batch_size:(batch_i + 1) * batch_size, :],
-                         embedding_snps_input[batch_i * batch_size:(batch_i + 1) * batch_size, :],
-                         embedding_gene_input[batch_i * batch_size:(batch_i + 1) * batch_size, :],
-                         embedding_snps_input[batch_i * batch_size:(batch_i + 1) * batch_size, :],
-                         embedding_snps_input[batch_i * batch_size:(batch_i + 1) * batch_size, :],
-                         embedding_snps_input[batch_i * batch_size:(batch_i + 1) * batch_size, :],
-                         embedding_snps_input[batch_i * batch_size:(batch_i + 1) * batch_size, :]])
-                    prediction_all.append(prediction.numpy())
-                    feature_snps_all.append(feature_snps.numpy())
-                    feature_cuis_all.append(feature_cuis.numpy())
-                prediction_all = np.array(prediction_all).reshape((batch_size * batch_max, -1))
-                prediction_all = list(prediction_all)[0:len(CUIs_all_covered)]  # tf.nn.sigmoid(prediction)
-
-                index_ranking = len(prediction_all) + 1 - ss.rankdata(prediction_all, method='max')
-
-                MRR.append(1.0 / index_ranking[eval_index[snps_i]])
-                rank_total.append(index_ranking[eval_index[snps_i]])
-
-                if index_ranking[eval_index[snps_i]] < 51:
-                    dic_snps_recall50[pair_snps_cui] = dic_snps_recall50[pair_snps_cui] + 1
-                    if index_ranking[eval_index[snps_i]] < 11:
-                        dic_snps_recall10[pair_snps_cui] = dic_snps_recall10[pair_snps_cui] + 1
-
-            MRR=np.mean(MRR)
-            recall50=1.0*np.sum(list(dic_snps_recall50.values()))/len(eval_SNPs)
-            recall10 = 1.0 * np.sum(list(dic_snps_recall10.values())) / len(eval_SNPs)
-            print("---------------MRR: ", MRR, "recall10: ", recall10, "recall50: ", recall50, "rank_mean: ",
-                  np.mean(rank_total), "rank_median: ", np.median(rank_total))
-        #########################################for test######################################
-        epoch_num += 1
-        train_label = []
-        train_prediction = []
-        i_number = -1
-        except_number=0
-        for traindata_snps,traindata_cuis, traindata_Y,unlabel_snps,unlabel_snps_gene, unlabel_disease,traindata_gene,traindata_gene_ppi_1, traindata_gene_ppi_2, train_gene_weight, \
-                traindata_snps_positive,traindata_snps_positive_gene,traindata_snps_negative,traindata_snps_negative_gene,train_gene_PPI_p1_weight in ds_train:
-            i_number += 1
-            if True:
-                loss,prediction, label =  \
-                    train_step(model, epoch_num,traindata_snps, traindata_cuis,traindata_Y, unlabel_snps,unlabel_snps_gene,
-                               unlabel_disease,traindata_gene,traindata_gene_ppi_1, traindata_gene_ppi_2,train_gene_weight,
-                               traindata_snps_positive,traindata_snps_positive_gene,traindata_snps_negative,traindata_snps_negative_gene,train_gene_PPI_p1_weight)
-            # except:
-            #     except_number+=1
-            #     print("----------------------------------------------------------------error----------------------------------------------------------")
-
-            if i_number == 0:
-                train_prediction = np.array(prediction)
-                train_label = np.array(label)
-            else:
-                train_prediction = np.concatenate((train_prediction, np.array(prediction)), axis=0)
-                train_label = np.concatenate((train_label, np.array(label)), axis=0)
-
-        print("----------------------------------------------------------------error----------------------------------------except_number: ",except_number,"----------------")
-        AUC_overall_train = roc_auc_score(train_label, train_prediction)
-        if epoch_num % epoch_show == 0 or epoch_num > epochs - 3:
-            label_valid = []
-            pred_valid = []
-            snps_valid=[]
-            pair_valid=[]
-            dic_cui_prediction={}
-            dic_cui_snps={}
-            dic_cui_label={}
-
-            dic_snps_prediction = {}
-            dic_snps_cuis = {}
-            dic_snps_label = {}
-            i_number = -1
-
-            for testdata_cuis,testdata_snps,testdata_Y,test_names,test_pair,testdata_cuis_gene in ds_test:
-                i_number+=1
-                label, prediction = valid_step(model, testdata_snps, testdata_cuis, testdata_Y,testdata_cuis_gene)
-                if i_number == 0:
-                    pred_valid = np.array(prediction)
-                    label_valid = np.array(testdata_Y.numpy())
-                    snps_valid = np.array(test_names.numpy())
-                    pair_valid = np.array(test_pair.numpy())
+        dic_snp_miss[snps] = 1
+        dic_pair_miss[str(snps) + str(cui)] = 1
+
+        if not snps in dic_snps_emb:
+            dic_snp_miss_emb[snps] = 1
+        if not snps in dic_snps_gene:
+            dic_snp_miss_gene[snps] = 1
+
+        if snps in dic_snps_gene and not dic_snps_gene[snps] in dic_gene_emb:
+            dic_snp_miss_gene_emb[dic_snps_gene[snps]] = 1
+print("----------------------dic_cui_valid : ", len(dic_cui_valid))
+print("----------------------dic_pair_miss : ", len(dic_pair_miss))
+print("----------------------dic_snp_miss : ", len(dic_snp_miss))
+print("------------pairs_valid: ", pairs_valid)
+print("dic_snps_no_gene_l len: ", len(dic_snps_no_gene_l))
+
+print("dic_snp_miss_emb: ", len(dic_snp_miss_emb))
+print("dic_snp_miss_gene: ", len(dic_snp_miss_gene))
+print("dic_snp_miss_gene_emb: ", len(dic_snp_miss_gene_emb))
+
+df = pd.DataFrame({})
+df["snp"] = list(set(dic_snp_miss_emb.keys()))
+df.to_csv(dirr + "snps_miss_without_snp_embedding.csv", index=False)
+df = pd.DataFrame({})
+df["snp"] = list(set(dic_snp_miss_gene.keys()))
+df.to_csv(dirr + "snps_miss_without_mapped_genes.csv", index=False)
+df = pd.DataFrame({})
+df["snp"] = list(set(dic_snp_miss_gene_emb.keys()))
+df.to_csv(dirr + "snps_miss_without_mapped_gene_without_embedding.csv", index=False)
+
+################################extract snps with domains############################################
+df = pd.read_csv(dirr + "domains_all_genes_new_domainONLY.csv")
+genes = list(df["genes"])
+starts = list(df["start"])
+ends = list(df["end"])
+domains = list(df["simplified"])
+dic_gene_domain = {}
+for gene, start, end, domain in zip(genes, starts, ends, domains):
+    if ";" in domain:
+        strings = domain.split(";")
+        for string in strings:
+            string = string.strip().lower()
+            dic_gene_domain.setdefault(gene, []).append((int(start), int(end), string))
+    else:
+        domain = domain.strip().lower()
+        dic_gene_domain.setdefault(gene, []).append((int(start), int(end), domain))
+print("------------dic_gene_domain len: ", len(dic_gene_domain))
+
+
+def extract_number(string):
+    number = ''
+    for char in string:
+        if char.isdigit():
+            number += char
+    if number:
+        return int(number)
+    else:
+        return -1
+
+
+dic_snp_domain = {}
+dic_gene_snps_domain = {}
+dic_domain_snp = {}
+gene_valid_snps_with_domain = {}
+for snp in dic_snps_gene:
+    if snp in dic_snps_emb:
+        gene = dic_snps_gene[snp]
+        position = str(snp).split(".")[-1]
+        position = extract_number(position)
+        if gene in dic_gene_domain and position > 0:
+            gene_valid_snps_with_domain[gene] = 1
+            for start, end, domain in dic_gene_domain[gene]:
+                if start <= position <= end:
+                    dic_snp_domain.setdefault(snp, []).append(domain)
+                    dic_domain_snp.setdefault(domain, []).append(snp)
+                    dic_gene_snps_domain.setdefault(gene, []).append(snp)
+print("----dic_snp_domain len: ", len(dic_snp_domain))
+print("------gene_valid_snps_with_domain len: ", len(gene_valid_snps_with_domain))
+################################extract snps with domains############################################
+
+CUIs_all_covered = list(dic_cui_valid.keys())
+df = pd.DataFrame({"CUIs": CUIs_all_covered})
+df.to_csv(dirr + file_CUI_covered, index=False)
+
+snps_with_embedding = dic_snps_emb.keys()
+snps_with_gene = dic_snps_gene.keys()
+
+snps_with_embedding_gene = list(set(snps_with_embedding).intersection(set(snps_with_gene)))
+
+
+dic_ppi_HiUnion = {}
+dic_ENSG_gene = {}
+lines = open(dirr + "ENSG_geneName_mapping.txt").readlines()
+for line in lines[1:]:
+    ENSG, gene = line.strip().split("\t")
+    ENSG = ENSG.split(".")[0]
+    dic_ENSG_gene[ENSG] = str(gene).strip()
+print("dic_ENSG_gene len: ", len(dic_ENSG_gene))
+df = pd.read_csv(dirr + "PPI_HI-union.csv")
+genes1 = list(df["protein1"])
+genes2 = list(df["protein2"])
+for gene1, gene2 in zip(genes1, genes2):
+    if gene1 in dic_ENSG_gene and gene2 in dic_ENSG_gene:
+        dic_ppi_HiUnion.setdefault(dic_ENSG_gene[gene1], []).append(dic_ENSG_gene[gene2])
+        dic_ppi_HiUnion.setdefault(dic_ENSG_gene[gene2], []).append(dic_ENSG_gene[gene1])
+PPI_numbers_HiUnion = []
+print("dic_ppi_HiUnion len: ", len(dic_ppi_HiUnion))
+dic_ppi_HiUnion_valid = {}
+dic_pair_ppi_HiUnion_valid = 0
+for gene in dic_ppi_HiUnion:
+    if not len(set(dic_ppi_HiUnion[gene])) > PPI_number_threshold:
+        dic_ppi_HiUnion_valid[gene] = 1
+        PPI_numbers_HiUnion.append(len(dic_ppi_HiUnion[gene]))
+
+PPI_numbers_HiUnion.sort()
+
+dic_ppi_HINT = {}
+lines = open(dirr + "HomoSapiens_binary_hq.txt").readlines()
+dic_unipro_gene = {}
+for line in lines[1:]:
+    strings = line.strip().split("\t")
+    gene1 = str(strings[2]).strip()
+    gene2 = str(strings[3]).strip()
+
+    uniID1 = str(strings[0]).strip()
+    uniID2 = str(strings[1]).strip()
+    dic_unipro_gene[uniID1] = gene1
+    dic_unipro_gene[uniID2] = gene2
+
+    if gene1 in dic_gene_emb and gene2 in dic_gene_emb:
+        dic_ppi_HINT.setdefault(gene1, []).append(gene2)
+        dic_ppi_HINT.setdefault(gene2, []).append(gene1)
+PPI_numbers_HINT = []
+
+dic_ppi_HINT_valid = {}
+ppi_HINT_all_valid = 0
+print("dic_ppi_HINT len: ", len(dic_ppi_HINT))
+for gene in dic_ppi_HINT:
+    if not len(set(dic_ppi_HINT[gene])) > PPI_number_threshold:
+        ppi_HINT_all_valid += len(set(dic_ppi_HINT[gene]))
+        dic_ppi_HINT_valid[gene] = 1
+        PPI_numbers_HINT.append(len(set(dic_ppi_HINT[gene])))
+PPI_numbers_HINT.sort()
+
+dic_ppi_HINT_HQ = {}
+lines = open(dirr + "HomoSapiens_htb_hq.txt").readlines()
+for line in lines[1:]:
+    strings = line.strip().split("\t")
+    gene1 = str(strings[2]).strip()
+    gene2 = str(strings[3]).strip()
+    uniID1 = str(strings[0]).strip()
+    uniID2 = str(strings[1]).strip()
+    dic_unipro_gene[uniID1] = gene1
+    dic_unipro_gene[uniID2] = gene2
+    if gene1 in dic_gene_emb and gene2 in dic_gene_emb:
+        dic_ppi_HINT_HQ.setdefault(gene1, []).append(gene2)
+        dic_ppi_HINT_HQ.setdefault(gene2, []).append(gene1)
+PPI_numbers_HINT_HQ = []
+print("dic_ppi_HINT len: ", len(dic_ppi_HINT_HQ))
+dic_ppi_HINT_HQ_valid = {}
+for gene in dic_ppi_HINT_HQ:
+    if not len(set(dic_ppi_HINT_HQ[gene])) > PPI_number_threshold:
+        dic_ppi_HINT_HQ_valid[gene] = 1
+        PPI_numbers_HINT_HQ.append(len(set(dic_ppi_HINT_HQ[gene])))
+PPI_numbers_HINT_HQ.sort()
+
+dic_ppi_HINT_interface_gene1_gene2 = {}
+dic_ppi_HINT_interface_gene_valid = {}
+dic_ppi_HINT_interface = {}
+lines = open(dirr + "H_sapiens_interfacesALL.txt").readlines()
+
+dic_ppi_HINT_interfac_genes = {}
+dic_ppi_HINT_interfac_position_pairs = {}
+dic_ppi_HINT_interfac_position_gene_gene = {}
+
+for line in lines[1:test_number]:
+    strings = line.strip().split("\t")
+    gene1 = str(strings[0]).strip()
+    gene2 = str(strings[1]).strip()
+    if gene1 in dic_unipro_gene:
+        gene1 = dic_unipro_gene[gene1]
+    if gene2 in dic_unipro_gene:
+        gene2 = dic_unipro_gene[gene2]
+    if gene1 in dic_gene_emb and gene2 in dic_gene_emb:
+        pair1 = gene1 + "_" + gene2
+        pair2 = gene2 + "_" + gene1
+        dic_ppi_HINT_interface.setdefault(gene1, []).append(gene2)
+        dic_ppi_HINT_interface.setdefault(gene2, []).append(gene1)
+
+        postion1_string = str(strings[3]).strip()
+        postion2_string = str(strings[4]).strip()
+        position1 = str(postion1_string[1:-1])
+        position2 = str(postion2_string[1:-1])
+        if len(position1) > 0 and len(position2) > 0:
+            positions1 = position1.split(",")
+            positions2 = position2.split(",")
+
+            dic_ppi_HINT_interfac_genes[pair1] = 1
+            dic_ppi_HINT_interfac_position_gene_gene.setdefault(gene1, []).append(gene2)
+            dic_ppi_HINT_interfac_position_gene_gene.setdefault(gene2, []).append(gene1)
+            dic_ppi_HINT_interface_gene_valid[gene1] = 1
+            dic_ppi_HINT_interface_gene_valid[gene2] = 1
+
+            for pos in positions1:
+                if not "-" in pos:
+                    pos = int(pos)
+                    for pos2 in positions2:
+                        if not "-" in pos2:
+                            pos2 = int(pos2)
+                            dic_ppi_HINT_interface_gene1_gene2.setdefault(pair1, {}).setdefault(pos, []).append(pos2)
+                            dic_ppi_HINT_interface_gene1_gene2.setdefault(pair2, {}).setdefault(pos2, []).append(pos)
+                            gene_gene_pos1_pos2 = gene1 + "_" + gene2 + "_" + str(pos) + "_" + str(pos2)
+                            dic_ppi_HINT_interfac_position_pairs[gene_gene_pos1_pos2] = 1
+
+                        else:
+                            pos2_start = int(pos2.split("-")[0])
+                            pos2_end = int(pos2.split("-")[1])
+                            if pos2_end > pos2_start:
+                                for pos2_i in range(pos2_start, pos2_end + 1):
+                                    dic_ppi_HINT_interface_gene1_gene2.setdefault(pair1, {}).setdefault(pos, []).append(
+                                        pos2_i)
+                                    dic_ppi_HINT_interface_gene1_gene2.setdefault(pair2, {}).setdefault(pos2_i,
+                                                                                                        []).append(pos)
+                                    gene_gene_pos1_pos2 = gene1 + "_" + gene2 + "_" + str(pos) + "_" + str(pos2_i)
+                                    dic_ppi_HINT_interfac_position_pairs[gene_gene_pos1_pos2] = 1
                 else:
-                    pred_valid = np.concatenate((pred_valid, np.array(prediction)), axis=0)
-                    label_valid = np.concatenate((label_valid, np.array(testdata_Y.numpy())), axis=0)
-                    snps_valid = np.concatenate((snps_valid, np.array(test_names.numpy())), axis=0)
-                    pair_valid = np.concatenate((pair_valid, np.array(test_pair.numpy())), axis=0)
+                    pos1_start = int(pos.split("-")[0])
+                    pos1_end = int(pos.split("-")[1])
 
-            pred_valid=np.array(pred_valid).reshape((-1, 1))
-            label_valid = np.array(label_valid).reshape((-1, 1))
-            snps_valid = np.array(snps_valid).reshape((-1, 1))
-            pair_valid = np.array(pair_valid).reshape((-1, 1))
+                    for pos in range(pos1_start, pos1_end + 1):
+                        for pos2 in positions2:
+                            if not "-" in pos2:
+                                pos2 = int(pos2)
+                                dic_ppi_HINT_interface_gene1_gene2.setdefault(pair1, {}).setdefault(pos, []).append(
+                                    pos2)
+                                dic_ppi_HINT_interface_gene1_gene2.setdefault(pair2, {}).setdefault(pos2, []).append(
+                                    pos)
+                                gene_gene_pos1_pos2 = gene1 + "_" + gene2 + "_" + str(pos) + "_" + str(pos2)
+                                dic_ppi_HINT_interfac_position_pairs[gene_gene_pos1_pos2] = 1
+                            else:
+                                pos2_start = int(pos2.split("-")[0])
+                                pos2_end = int(pos2.split("-")[1])
+                                if pos2_end > pos2_start:
+                                    for pos2_i in range(pos2_start, pos2_end + 1):
+                                        dic_ppi_HINT_interface_gene1_gene2.setdefault(pair1, {}).setdefault(pos,
+                                                                                                            []).append(
+                                            pos2_i)
+                                        dic_ppi_HINT_interface_gene1_gene2.setdefault(pair2, {}).setdefault(pos2_i,
+                                                                                                            []).append(
+                                            pos)
+                                        gene_gene_pos1_pos2 = gene1 + "_" + gene2 + "_" + str(pos) + "_" + str(pos2_i)
+                                        dic_ppi_HINT_interfac_position_pairs[gene_gene_pos1_pos2] = 1
 
-            label_all=[]
-            prediction_all=[]
+print("dic_ppi_HINT_interface_gene_valid len: ", len(dic_ppi_HINT_interface_gene_valid))
+print("---------------------------dic_ppi_HINT_interface_gene1_gene2 len: ", len(dic_ppi_HINT_interface_gene1_gene2))
+print("---------------------------dic_ppi_HINT_interfac_position_pairs len: ",
+      len(dic_ppi_HINT_interfac_position_pairs))
+print("dic_ppi_HINT_interface len: ", len(dic_ppi_HINT_interface))
 
-            CUIs_val=[]
-            SNPs_val=[]
-            prediction_val=[]
-            label_val=[]
+PPI_numbers_HINT_interface = []
+print("dic_ppi_HINT_interface len: ", len(dic_ppi_HINT_interface))
+for gene in dic_ppi_HINT_interface:
+    PPI_numbers_HINT_interface.append(len(set(dic_ppi_HINT_interface[gene])))
+PPI_numbers_HINT_interface.sort()
+print("----PPI_numbers_HINT_interface[0:50]:---- ", PPI_numbers_HINT_interface[0:50])
+print("---PPI_numbers_HINT_interface[-50]:--- ", PPI_numbers_HINT_interface[-50:])
+print("----PPI_numbers_HINT_interface mean: ---", np.mean(PPI_numbers_HINT_interface))
+print("----PPI_numbers_HINT_interface median: ---", np.median(PPI_numbers_HINT_interface))
 
-            for rowi in range(len(pred_valid)):
-                snps=str(pair_valid[rowi]).split("_")[0]
-                cui = str(pair_valid[rowi]).split("_")[1]
-                prediction = pred_valid[rowi][0]
-                label = label_valid[rowi][0]
+df = pd.read_csv(dirr + file_PPI_labels)
+display_relations = list(df["display_relation"])
+x_names = list(df["x_name"])
+y_names = list(df["y_name"])
+dic_ppi_initial = {}
+dic_ppi_primkg = {}
+for relation, x_name, y_name in zip(display_relations, x_names, y_names):
+    if relation == "ppi" and x_name in dic_gene_emb and y_name in dic_gene_emb and x_name != y_name and x_name in dic_gene_label and y_name in dic_gene_label:
+        dic_ppi_primkg.setdefault(x_name, []).append(y_name)
+        dic_ppi_primkg.setdefault(y_name, []).append(x_name)
+for gene in dic_ppi_initial:
+    dic_ppi_primkg[gene] = list(set(dic_ppi_initial[gene]))
 
+dic_gene_label_ppi = {}
+genes_all_with_ppi = list(dic_ppi_primkg.keys())
+ppi_length_label = []
 
+df = pd.read_csv(dirr + file_pathway)
+relations = list(df["relation"])
+x_types = list(df["x_type"])
+x_names = list(df["x_name"])
+y_types = list(df["y_type"])
+y_names = list(df["y_name"])
+dic_gene_process = {}
+for relation, x_type, x_name, y_type, y_name in zip(relations, x_types, x_names, y_types, y_names):
+    if relation == "bioprocess_protein" and x_type == "gene/protein" and y_type == "biological_process" and x_name in dic_gene_emb and x_name in dic_gene_label:
+        dic_gene_process.setdefault(x_name, []).append(y_name)
 
-                SNPs_val.append(snps_valid[rowi][0])
-                CUIs_val.append(cui[0:-2])
-                prediction_val.append(prediction)
-                label_val.append(label)
+dic_process_gene_gene_inital = {}
+for gene1 in dic_gene_process:
+    for gene2 in dic_gene_process:
+        if gene1 != gene2:
+            process1 = dic_gene_process[gene1]
+            process2 = dic_gene_process[gene2]
+            if len(set(process1).intersection(set(process2))) > 0:
+                dic_process_gene_gene_inital.setdefault(gene1, []).append(gene2)
+                dic_process_gene_gene_inital.setdefault(gene2, []).append(gene1)
 
+dic_process_gene_gene = {}
+for gene in dic_process_gene_gene_inital:
+    dic_process_gene_gene[gene] = list(set(dic_process_gene_gene_inital[gene]))
 
+dic_ppi_pathway = {}
+genes_pathway_ppi = list(set(dic_ppi_primkg.keys()).union(set(dic_process_gene_gene.keys())))
+for gene in genes_pathway_ppi:
+    if gene in dic_process_gene_gene and gene in dic_ppi_primkg:
+        dic_ppi_pathway[gene] = list(set(dic_ppi_primkg[gene]).union(set(dic_process_gene_gene[gene])))
+    else:
+        if gene in dic_ppi_primkg:
+            dic_ppi_pathway[gene] = dic_ppi_primkg[gene]
+        else:
+            dic_ppi_pathway[gene] = dic_process_gene_gene[gene]
+print("dic_ppi_pathway_union len: ", len(dic_ppi_pathway))
 
-                label_all.append(label)
-                prediction_all.append(prediction)
-
-                dic_cui_prediction.setdefault(cui,[]).append(prediction)
-                dic_cui_label.setdefault(cui, []).append(label)
-
-                dic_snps_prediction.setdefault(snps_valid[rowi][0], []).append(prediction)
-                dic_snps_label.setdefault(snps_valid[rowi][0], []).append(label)
-
-            df = pd.DataFrame({})
-            print("-------------saving SNP_CUI_score_label_test: len prediction_val: ",len(prediction_val))
-            df["SNPs"] = SNPs_val
-            df["CUI"] = CUIs_val
-            df["score"] = prediction_val
-            df["label"] = label_val
-            df.to_csv(dirr_results + "SNP_CUI_score_label_test.csv", index=False)
-
-            AUC_SNPs=[]
-            AUC_SNPs_name=[]
-            AUC_cuis=[]
-            AUC_cui_name=[]
-
-            PRC_gain_SNPs=[]
-            PRC_gain_cuis=[]
-            PRC_SNPs=[]
-
-            PRC_cuis=[]
-            PRC_cui_name=[]
-            PRC_SNPs_name = []
-            for snps in dic_snps_prediction:
-                if np.sum(dic_snps_label[snps]) > 0 and not np.sum(dic_snps_label[snps])==len(dic_snps_label[snps]):
-                    # print ("dic_snps_label[snps]: ",len(dic_snps_label[snps]))
-                    # print("dic_snps_prediction[snps]: ", len(dic_snps_prediction[snps]))
-                    auc = roc_auc_score(dic_snps_label[snps], dic_snps_prediction[snps])
-                    AUC_SNPs.append(auc)
-                    AUC_SNPs_name.append(snps)
-
-                    lr_precision, lr_recall, _ = precision_recall_curve(dic_snps_label[snps], dic_snps_prediction[snps])
-                    prc = metrics.auc(lr_recall, lr_precision)
-                    Prevelance = 1.0 * np.sum(dic_snps_label[snps]) / len(dic_snps_label[snps])
-                    prc_gain = 1.0 * (prc - Prevelance) / Prevelance
-                    PRC_gain_SNPs.append(prc_gain)
-                    PRC_SNPs.append(prc)
-                    PRC_SNPs_name.append(snps)
-
-
-            for cui in dic_cui_prediction:
-                if np.sum(dic_cui_label[cui])>0 and not np.sum(dic_cui_label[cui])==len(dic_cui_label[cui]):
-                    auc = roc_auc_score(dic_cui_label[cui], dic_cui_prediction[cui])
-                    AUC_cuis.append(auc)
-                    AUC_cui_name.append(cui)
-                    lr_precision, lr_recall, _ = precision_recall_curve(dic_cui_label[cui], dic_cui_prediction[cui])
-                    prc = metrics.auc(lr_recall, lr_precision)
-                    Prevelance = 1.0 * np.sum(dic_cui_label[cui]) / len(dic_cui_label[cui])
-                    prc_gain = 1.0 * (prc - Prevelance) / Prevelance
-                    PRC_gain_cuis.append(prc_gain)
-                    PRC_cuis.append(prc)
-                    PRC_cui_name.append(cui)
-
-            df = pd.DataFrame({})
-            df["AUC"] = AUC_cuis
-            df["CUI"] = AUC_cui_name
-            df.to_csv(dirr_results + "AUC_CUI_test.csv", index=False)
-
-            df = pd.DataFrame({})
-            df["AUC"] = AUC_SNPs
-            df["SNP"] = AUC_SNPs_name
-            df.to_csv(dirr_results + "AUC_SNPs_test.csv", index=False)
-
-            df = pd.DataFrame({})
-            df["PRC"] = PRC_cuis
-            df["CUI"] = PRC_cui_name
-            df.to_csv(dirr_results + "PRC_CUI_test.csv", index=False)
-
-            df = pd.DataFrame({})
-            df["PRC"] = PRC_SNPs
-            df["SNP"] = PRC_SNPs_name
-            df.to_csv(dirr_results + "PRC_SNPs_test.csv", index=False)
+########################################getting the weights of genes based on the annotated paris###############
+print("dic_gene_labeled_number: ", len(dic_gene_labeled_number), "total_labeled_num: ", total_labeled_num)
+dic_gene_weight = {}
+gene_weights_all = []
+for gene in dic_gene_labeled_number:
+    dic_gene_weight[gene] = 1 / np.log2(1 + 3000.0 * dic_gene_labeled_number[gene] / total_labeled_num)
+    gene_weights_all.append(1 / np.log2(1 + 3000.0 * dic_gene_labeled_number[gene] / total_labeled_num))
+gene_weghts_median = np.median(gene_weights_all)
+gene_weights_all.sort()
+########################################getting the weights of genes based on the annotated paris###############
 
 
-            if not len(prediction_all)==np.sum(label_all) and np.sum(label_all)>0:
-                AUC_overall = roc_auc_score(label_all, prediction_all)
-                auc_total.append(np.mean(AUC_overall))
+snps_total = list(set(list(dic_snps_cui.keys())))
+snps_total = list(snps_total)
+random.shuffle(snps_total)
+
+
+def extract_number(string):
+    number = ''
+    for char in string:
+        if char.isdigit():
+            number += char
+    if number:
+        return int(number)
+    else:
+        return -1
+
+
+########################################geting the snps postives/negatives based on PPIs###############
+genes_labeled_all = list(dic_gene_label.keys())
+dic_snps_PPI_interface_positives = {}
+dic_snps_PPI_HINT_HQ_positives = {}
+dic_snps_PPI_HINT_positives = {}
+dic_snps_PPI_HIU_positives = {}
+dic_snps_PPI_domain_positives = {}
+dic_snps_PPI_interface_negatives = {}
+dic_snps_PPI_HINT_HQ_negatives = {}
+dic_snps_PPI_HINT_negatives = {}
+dic_snps_PPI_HIU_negatives = {}
+dic_snps_PPI_domain_negatives = {}
+dic_position_positive_hit_gene = {}
+dic_position_positive_hit_variant_pair = {}
+dic_position_positive_hit_gene_pair = {}
+flag_variant_test = 0
+print("---dic_snps_gene.keys() len: ", len(dic_snps_gene.keys()))
+dic_snp_ppi_domain_valid_all = {}
+snps_all_benign = list(dic_snps_benign.keys())
+for snp in list(dic_snps_patho.keys())[0:test_number]:
+    flag_variant_test += 1
+    gene = dic_snps_gene[snp]
+    position = str(snp).split(".")[-1]
+    position = extract_number(position)
+    if flag_variant_test % 50000 == 4999:
+        print("flag_variant_test: ", flag_variant_test)
+        print("---------------------------------------dic_position_positive_hit_variant_pair len: ",
+              len(dic_position_positive_hit_variant_pair))
+        print("---------------------------------------dic_position_positive_hit_gene len: ",
+              len(dic_position_positive_hit_gene))
+        print("---------------------------------------dic_position_positive_hit_gene_pair len: ",
+              len(dic_position_positive_hit_gene_pair))
+    if position > 0 and gene in dic_ppi_HINT_interfac_position_gene_gene:
+        genes2 = set(dic_ppi_HINT_interfac_position_gene_gene[gene])
+        for gene2 in genes2:
+            pair_key = gene + "_" + gene2
+            if pair_key in dic_ppi_HINT_interface_gene1_gene2 and position in dic_ppi_HINT_interface_gene1_gene2[
+                pair_key]:
+                snps_gene2 = dic_gene_snps[gene2]
+                for snp_p in snps_gene2:
+                    position_p = str(snp_p).split(".")[-1]
+                    position_p = extract_number(position_p)
+                    if snp_p in snps_patho_all and position_p in dic_ppi_HINT_interface_gene1_gene2[pair_key][position]:
+                        dic_snps_PPI_interface_positives.setdefault(snp, []).append(snp_p)
+                        dic_position_positive_hit_variant_pair[snp + snp_p] = 1
+                        dic_position_positive_hit_gene[gene] = 1
+                        dic_position_positive_hit_gene_pair[gene + "_" + gene2] = 1
+                        dic_position_positive_hit_gene_pair[gene2 + "_" + gene] = 1
+                        dic_snp_ppi_domain_valid_all[snp] = 1
+
+        genes_negatives = list(set(genes_labeled_all) - set(dic_ppi_HINT_interfac_position_gene_gene[gene]))
+        if gene in dic_ppi_HiUnion:
+            genes_negatives = list(set(genes_negatives) - set(dic_ppi_HiUnion[gene]))
+        if gene in dic_ppi_pathway:
+            genes_negatives = list(set(genes_negatives) - set(dic_ppi_pathway[gene]))
+        number_valid = 0
+        for gene_n in dic_gene_negatives[gene][0:50]:
+            if gene_n in genes_negatives and number_valid < 5:
+                if gene_n != gene:
+                    snps_temp = dic_gene_snps[gene_n]
+                    for snp_ii in random.choices(snps_temp, k=5):
+                        if snp_ii in dic_snps_emb:
+                            number_valid += 1
+                            dic_snps_PPI_interface_negatives.setdefault(snp, []).append(snp_ii)
+        if snp in dic_snps_PPI_interface_positives and not snp in dic_snps_PPI_interface_negatives:
+            dic_snps_PPI_interface_negatives.setdefault(snp, []).append(random.choice(snps_all_benign))
+
+    if not snp in dic_snp_ppi_domain_valid_all and gene in dic_ppi_HINT_HQ:
+        dic_gene_temp = dic_ppi_HINT_HQ
+        if len(dic_gene_temp) > 0:
+            if gene in dic_gene_temp:
+                for gene_p in dic_gene_temp[gene]:
+                    if gene_p != gene and gene_p in dic_gene_label and gene_p in dic_gene_emb:
+                        snps_temp = dic_gene_snps[gene_p]
+                        for snp_ii in random.choices(snps_temp, k=20):
+                            if snp_ii in snps_patho_all:
+                                dic_snps_PPI_HINT_HQ_positives.setdefault(snp, []).append(snp_ii)
+                                dic_snp_ppi_domain_valid_all[snp] = 1
+                genes_negatives = list(set(genes_labeled_all) - set(dic_gene_temp[gene]))
+                if gene in dic_ppi_HiUnion:
+                    genes_negatives = list(set(genes_negatives) - set(dic_ppi_HiUnion[gene]))
+                if gene in dic_ppi_pathway:
+                    genes_negatives = list(set(genes_negatives) - set(dic_ppi_pathway[gene]))
+                number_valid = 0
+                for gene_n in dic_gene_negatives[gene][0:50]:
+                    if gene_n != gene and gene_n in dic_gene_emb and number_valid < 5:
+                        snps_temp = dic_gene_snps[gene_n]
+                        for snp_ii in random.choices(snps_temp, k=4):
+                            if snp_ii in dic_snps_emb:
+                                number_valid += 1
+                                dic_snps_PPI_HINT_HQ_negatives.setdefault(snp, []).append(snp_ii)
+
+                if snp in dic_snps_PPI_HINT_HQ_positives and not snp in dic_snps_PPI_HINT_HQ_negatives:
+                    dic_snps_PPI_HINT_HQ_negatives.setdefault(snp, []).append(random.choice(snps_all_benign))
+
+    if not snp in dic_snp_ppi_domain_valid_all and gene in dic_ppi_HINT:
+        dic_gene_temp = dic_ppi_HINT
+        if len(dic_gene_temp) > 0:
+            if gene in dic_gene_temp:
+                for gene_p in dic_gene_temp[gene]:
+                    if gene_p != gene and gene_p in dic_gene_label and gene_p in dic_gene_emb:
+                        snps_temp = dic_gene_snps[gene_p]
+                        for snp_ii in random.choices(snps_temp, k=20):
+                            if snp_ii in snps_patho_all:
+                                dic_snps_PPI_HINT_positives.setdefault(snp, []).append(snp_ii)
+                                dic_snp_ppi_domain_valid_all[snp] = 1
+                genes_negatives = list(set(genes_labeled_all) - set(dic_gene_temp[gene]))
+                if gene in dic_ppi_HiUnion:
+                    genes_negatives = list(set(genes_negatives) - set(dic_ppi_HiUnion[gene]))
+                if gene in dic_ppi_pathway:
+                    genes_negatives = list(set(genes_negatives) - set(dic_ppi_pathway[gene]))
+                number_valid = 0
+                for gene_n in dic_gene_negatives[gene][0:50]:
+                    if gene_n != gene and gene_n in dic_gene_emb and number_valid < 5:
+                        snps_temp = dic_gene_snps[gene_n]
+                        for snp_ii in random.choices(snps_temp, k=3):
+                            if snp_ii in dic_snps_emb:
+                                number_valid += 1
+                                dic_snps_PPI_HINT_negatives.setdefault(snp, []).append(snp_ii)
+
+                if snp in dic_snps_PPI_HINT_positives and not snp in dic_snps_PPI_HINT_negatives:
+                    dic_snps_PPI_HINT_negatives.setdefault(snp, []).append(random.choice(snps_all_benign))
+
+    if not snp in dic_snp_ppi_domain_valid_all and gene in dic_ppi_HiUnion:
+        dic_gene_temp = dic_ppi_HiUnion
+        if len(dic_gene_temp) > 0:
+            if gene in dic_gene_temp:
+                for gene_p in dic_gene_temp[gene]:
+                    if gene_p != gene and gene_p in dic_gene_emb:
+                        snps_temp = dic_gene_snps[gene_p]
+                        for snp_ii in random.choices(snps_temp, k=8):
+                            if snp_ii in snps_patho_all:
+                                dic_snps_PPI_HIU_positives.setdefault(snp, []).append(snp_ii)
+                                dic_snp_ppi_domain_valid_all[snp] = 1
+                genes_negatives = list(set(genes_labeled_all) - set(dic_gene_temp[gene]))
+                if gene in dic_ppi_HiUnion:
+                    genes_negatives = list(set(genes_negatives) - set(dic_ppi_HiUnion[gene]))
+                if gene in dic_ppi_pathway:
+                    genes_negatives = list(set(genes_negatives) - set(dic_ppi_pathway[gene]))
+                number_valid = 0
+                for gene_n in dic_gene_negatives[gene][0:50]:
+                    if gene_n != gene and gene_n in dic_gene_emb and number_valid < 5:
+                        snps_temp = dic_gene_snps[gene_n]
+                        for snp_ii in random.choices(snps_temp, k=2):
+                            if snp_ii in dic_snps_emb:
+                                number_valid += 1
+                                dic_snps_PPI_HIU_negatives.setdefault(snp, []).append(snp_ii)
+
+                if snp in dic_snps_PPI_HIU_positives and not snp in dic_snps_PPI_HIU_negatives:
+                    dic_snps_PPI_HIU_negatives.setdefault(snp, []).append(random.choice(snps_all_benign))
+
+print("---------------------------------------dic_position_positive_hit_variant_pair len: ",
+      len(dic_position_positive_hit_variant_pair))
+print("---------------------------------------dic_position_positive_hit_gene len: ",
+      len(dic_position_positive_hit_gene))
+print("---------------------------------------dic_position_positive_hit_gene_pair len: ",
+      len(dic_position_positive_hit_gene_pair))
+print("dic_snps_PPI_interface_positives len: ", len(dic_snps_PPI_interface_positives))
+print("dic_snps_PPI_interface_negatives len: ", len(dic_snps_PPI_interface_negatives))
+print("dic_snps_PPI_HINT_HQ_positives len: ", len(dic_snps_PPI_HINT_HQ_positives))
+print("dic_snps_PPI_HINT_HQ_negatives len: ", len(dic_snps_PPI_HINT_HQ_negatives))
+print("dic_snps_PPI_HINT_positives len: ", len(dic_snps_PPI_HINT_positives))
+print("dic_snps_PPI_HINT_negatives len: ", len(dic_snps_PPI_HINT_negatives))
+print("dic_snps_PPI_HIU_positives len: ", len(dic_snps_PPI_HIU_positives))
+print("dic_snps_PPI_HIU_negatives len: ", len(dic_snps_PPI_HIU_negatives))
+
+########################################geting the snps postives/negatives based on PPIs###############
+
+
+########################################geting the domain information of SNPs###############
+genes_labeled_all = list(dic_gene_label.keys())
+dic_snps_domain_negatives = {}
+dic_snps_domain_positives = {}
+snps_all_with_domain = list(set(dic_snp_domain.keys()))
+print("snps_all_with_domain: ", len(snps_all_with_domain))
+for snp in snps_all_with_domain[0:test_number]:
+    if snp in dic_snps_gene and snp in snps_patho_all:
+        position = str(snp).split(".")[-1]
+        position = extract_number(position)
+        gene = dic_snps_gene[snp]
+        for domain in set(dic_snp_domain[snp]):
+            if domain in dic_domain_snp:
+                for snp_p in set(dic_domain_snp[domain]):
+                    if snp_p in snps_patho_all:
+                        dic_snps_domain_positives.setdefault(snp, []).append(snp_p)
+                        dic_snp_ppi_domain_valid_all[snp] = 1
+
+                snps_temp = dic_gene_snps_domain[gene]
+                for snp_ii in snps_temp:
+                    position_n = str(snp_ii).split(".")[-1]
+                    position_n = extract_number(position_n)
+                    if not domain in dic_snp_domain[snp_ii] and abs(position_n - position) > 200:
+                        dic_snps_domain_negatives.setdefault(snp, []).append(snp_ii)
+
+                number_valid = 0
+                for gene_n in dic_gene_negatives[gene][0:100]:
+                    if number_valid < 5 and gene_n != gene and gene_n in dic_gene_emb and gene_n in dic_gene_snps_domain:
+                        snps_temp = dic_gene_snps_domain[gene_n]
+                        for snp_ii in random.choices(snps_temp, k=5):
+                            if not domain in dic_snp_domain[snp_ii]:
+                                number_valid += 1
+                                dic_snps_domain_negatives.setdefault(snp, []).append(snp_ii)
             else:
-                AUC_overall=0.5
-            # print ("AUC_per_SNPs: ",np.mean(AUC_SNPs))
-            # print("AUC_per_disease: ", np.mean(AUC_cuis))
-            # print("AUC_overall: ", AUC_overall)
+                for snp_p in dic_gene_snps[gene][0:400]:
+                    if not snp_p == snp and snp_p in snps_patho_all:
+                        position_p = str(snp_p).split(".")[-1]
+                        position_p = extract_number(position_p)
+                        if abs(position_p - position) < 12:
+                            dic_snps_domain_positives.setdefault(snp, []).append(snp_p)
 
-            lr_precision, lr_recall, _ = precision_recall_curve(label_all, prediction_all)
-            PRC_overall = metrics.auc(lr_recall, lr_precision)
-            Prevelance_overall=1.0*np.sum(label_all)/len(label_all)
-            PRC_overall_gain=1.0*(PRC_overall-Prevelance_overall)/Prevelance_overall
+        if snp in dic_snps_domain_positives and not snp in dic_snps_domain_negatives:
+            for snp_n in random.choices(snps_all_benign, k=5):
+                dic_snps_domain_negatives.setdefault(snp, []).append(snp_n)
 
-            print ("PRC_overall: ",PRC_overall ," prevelance: ",Prevelance_overall, "prevelance gain: ",PRC_overall_gain )
-
-            if epoch_num>10:
-               if np.mean(auc_total[-8:-4])>np.mean(auc_total[-4:]):
-                   epoch_num+=1
-            print("---epoch: %i,  loss: %3f, VAE_loss: %3f, CLIP_loss: %3f, train_loss_ppi: %3f, train_AUC: %3f, auc_overall: %3f,AUC_SNPs: %3f, "
-                  "AUC_disease: %3f prc_gain: %3f , prc_gain_snps: %3f, prc_gain_disease: %3f "
-                  % (epoch_num, train_loss.result(),VAE_loss.result(),train_loss_CLIP.result(),train_loss_ppi.result(),
-                     AUC_overall_train,  np.mean(AUC_overall), np.mean(AUC_SNPs),np.mean(AUC_cuis),
-                     PRC_overall_gain,np.mean(PRC_gain_SNPs),np.mean(PRC_gain_cuis)))
-
-            if save_flag == False and epoch_num > epochs - 3:
-                MRR = []
-                dic_snps_recall10 = {}
-                dic_snps_recall50 = {}
-                rank_total=[]
-                print( "-------------------------------------------------begin saving predictions-----------------------------------")
-                save_flag = True
-                CUIs_all_covered = list(pd.read_csv(dirr + file_CUIs_target)["CUIs"])
-                print("---CUIs_all_covered: ", len(CUIs_all_covered))
-
-                CUIs_embedding_test = []
-                add_num = batch_size - len(CUIs_all_covered) % batch_size
-                batch_size_test = len(CUIs_all_covered) + add_num
-                for cui in CUIs_all_covered:
-                    CUIs_embedding_test.append(dic_cui_emb[str(cui)])
-                for addi in range(add_num):
-                    CUIs_embedding_test.append(CUIs_embedding_test[random.randint(0, batch_size)])
-                CUIs_embedding_test = np.array(CUIs_embedding_test)
-                CUIs_embedding_test_input = tf.convert_to_tensor(CUIs_embedding_test, dtype=tf.float32)
-                snps_test = 0
-
-                feature_snps_save=[]
-                feature_cuis_save=[]
-                cuiname_save=[]
-                snpsname_save=[]
-                batch_max = int(len(CUIs_embedding_test_input) / batch_size)
-                MRR_save=[]
-                MRR_SNP=[]
-                MRR_CUI=[]
-                Ranking_save=[]
+print("--------------------------------------------------dic_snp_ppi_domain_valid_all len: ",
+      len(dic_snp_ppi_domain_valid_all), "-----------------------------------")
+print("---------------------------------------dic_position_positive_hit_variant_pair len: ",
+      len(dic_position_positive_hit_variant_pair))
+print("---------------------------------------dic_position_positive_hit_gene len: ",
+      len(dic_position_positive_hit_gene))
+print("---------------------------------------dic_position_positive_hit_gene_pair len: ",
+      len(dic_position_positive_hit_gene_pair))
+print("dic_snps_domain_positives len: ", len(dic_snps_domain_positives))
+print("dic_snps_domain_negatives len: ", len(dic_snps_domain_negatives))
 
 
-                for snps_i in range(len(eval_SNPs)):
-                    snps_index = eval_SNPs[snps_i]
-                    snps = dic_index_snps[snps_index]
-
-                    pair_snps_cui = str(snps_index) + "_snps_cui_" + str(eval_index[snps_i])
-                    dic_snps_recall10[pair_snps_cui] = 0
-                    dic_snps_recall50[pair_snps_cui] = 0
-
-                    #dic_snps_recall10[snps_index] = 0
-                    #dic_snps_recall50[snps_index] = 0
-                    snps_test += 1
-                    embedding_snps = dic_snpsname_emb_all[snps]
-                    embedding_snps = np.tile(embedding_snps, (batch_size_test, 1))
-                    embedding_snps_input = tf.convert_to_tensor(embedding_snps, dtype=tf.float32)
+########################################geting the domain information of SNPs###############
 
 
-                    embedding_gene = dic_gene_emb[dic_snps_gene[snps]]
-                    embedding_gene = np.tile(embedding_gene, (batch_size_test, 1))
-                    embedding_gene_input = tf.convert_to_tensor(embedding_gene, dtype=tf.float32)
-
-                    prediction_all = []
-                    feature_snps_all = []
-                    feature_cuis_all = []
-
-                    for batch_i in range(batch_max):
-                        prediction, loss_vae, feature_snps, feature_cuis,feature_temp1_,feature_temp2_,feature_snp_mean,_,_ = model(
-                            [embedding_snps_input[batch_i * batch_size:(batch_i + 1) * batch_size, :],
-                             CUIs_embedding_test_input[batch_i * batch_size:(batch_i + 1) * batch_size, :],
-                             embedding_snps_input[batch_i * batch_size:(batch_i + 1) * batch_size, :],
-                             embedding_gene_input[batch_i * batch_size:(batch_i + 1) * batch_size, :],
-                             CUIs_embedding_test_input[batch_i * batch_size:(batch_i + 1) * batch_size, :],
-                             embedding_gene_input[batch_i * batch_size:(batch_i + 1) * batch_size, :],
-                             embedding_snps_input[batch_i * batch_size:(batch_i + 1) * batch_size, :],
-                             embedding_gene_input[batch_i * batch_size:(batch_i + 1) * batch_size, :],
-                             embedding_snps_input[batch_i * batch_size:(batch_i + 1) * batch_size, :],
-                             embedding_snps_input[batch_i * batch_size:(batch_i + 1) * batch_size, :],
-                             embedding_snps_input[batch_i * batch_size:(batch_i + 1) * batch_size, :],
-                             embedding_snps_input[batch_i * batch_size:(batch_i + 1) * batch_size, :]])
-                        prediction_all.append(prediction.numpy())
-                        feature_snps_all.append(feature_snps.numpy())
-                        feature_cuis_all.append(feature_cuis.numpy())
-                    prediction_all = np.array(prediction_all).reshape((batch_size * batch_max, -1))
-                    prediction_all = list(prediction_all)[0:len(CUIs_all_covered)]  # tf.nn.sigmoid(prediction)
-                    index_ranking = len(prediction_all) + 1 - ss.rankdata(prediction_all, method='dense')
-                    MRR.append(1.0 / index_ranking[eval_index[snps_i]])
-
-                    MRR_save.append(1.0 / index_ranking[eval_index[snps_i]])
-                    MRR_SNP.append(snps)
-                    MRR_CUI.append(CUIs_all_covered[eval_index[snps_i]])
-                    Ranking_save.append(index_ranking[eval_index[snps_i]])
+def cosine_similarity_my(v1, v2):
+    # Compute the dot product of vectors v1 and v2
+    dot_product = np.dot(v1, v2)
+    # Compute the norm (magnitude) of each vector
+    norm_v1 = np.linalg.norm(v1)
+    norm_v2 = np.linalg.norm(v2)
+    # Compute cosine similarity
+    similarity = dot_product / (norm_v1 * norm_v2)
+    return similarity
 
 
-                    rank_total.append(index_ranking[eval_index[snps_i]])
-                    feature_snps_all = np.array(feature_snps_all).reshape((batch_size * batch_max, -1))
-                    feature_cuis_all = np.array(feature_cuis_all).reshape((batch_size * batch_max, -1))
-                    feature_snps_save.append(feature_snps_all[0])
-                    feature_cuis_save.append(feature_cuis_all[eval_index[snps_i]])
-                    cuiname_save.append(CUIs_all_covered[eval_index[snps_i]])
-                    snpsname_save.append(snps)
-                    if index_ranking[eval_index[snps_i]] < 51:
-                        dic_snps_recall50[pair_snps_cui] = dic_snps_recall50[pair_snps_cui] + 1
-                        if index_ranking[eval_index[snps_i]] < 11:
-                            dic_snps_recall10[pair_snps_cui] = dic_snps_recall10[pair_snps_cui] + 1
+dic_cui_cui_similarities = {}
+for cui in dic_cui_snps:
+    for cui2 in dic_cui_snps:
+        dic_cui_cui_similarities[(cui, cui2)] = cosine_similarity_my(dic_cui_emb[cui], dic_cui_emb[cui2])
+        dic_cui_cui_similarities[(cui2, cui)] = dic_cui_cui_similarities[(cui, cui2)]
 
-                    # if True:
-                    #     prediction, CUIs_all_covered = zip(*sorted(zip(prediction, CUIs_all_covered), reverse=True))
-                    #     df = pd.DataFrame({"CUIs": CUIs_all_covered, "pred": prediction})
-                    #     df.to_csv(dirr_results_prediction + str(int(snps_index)) + ".csv", index=False)
+dic_snp_positive_snps = {}
+dic_snp_negative_snps = {}
+snps_labeled_all = list(dic_snps_cui.keys())
+for snp in snps_labeled_all[0:test_number]:
+    position = str(snp).split(".")[-1]
+    position = extract_number(position)
 
-                MRR = np.mean(MRR)
-                recall50 = 1.0 * np.sum(list(dic_snps_recall50.values())) / len(eval_SNPs)
-                recall10 = 1.0 * np.sum(list(dic_snps_recall10.values())) / len(eval_SNPs)
-                print("---------------MRR: ", MRR, "recall10: ", recall10, "recall50: ", recall50, "rank_mean: ",np.mean(rank_total), "rank_median: ",np.median(rank_total))
+    cui_embedding_label = []
+    for cui_l in dic_snps_cui[snp]:
+        cui_embedding_label.append(dic_cui_emb[cui_l])
+        for cui_p in dic_cui_snps:
+            if dic_cui_cui_similarities[(cui_l, cui_p)] > 0.8 and cui_p != cui_l and cui_p in dic_cui_emb:
+                for snp_p in dic_cui_snps[cui_p]:
+                    if snp_p in dic_snps_emb and snp_p != snp and snp_p in dic_snps_gene:
+                        dic_snp_positive_snps.setdefault(snp, []).append(snp_p)
+    # if not snp in dic_snp_positive_snps:
+    #     dic_snp_positive_snps.setdefault(snp, []).append(snp)
+    cui_embedding_label = np.array(cui_embedding_label)
+    gene = dic_snps_gene[snp]
+    for snp_n in dic_gene_snps[gene]:
+        position_n = str(snp_n).split(".")[-1]
+        position_n = extract_number(position_n)
+        if snp_n in dic_snps_cui and snp_n in dic_snps_emb and snp_n != snp and abs(position_n - position) > 160:
+            cui_embedding_n = []
+            for cui_i in dic_snps_cui[snp_n]:
+                cui_embedding_n.append(dic_cui_emb[cui_i])
+            cui_embedding_n = np.array(cui_embedding_n)
+            similarity_n_l = cosine_similarity(cui_embedding_label, cui_embedding_n)
+            if np.max(similarity_n_l) < 0.6:
+                dic_snp_negative_snps.setdefault(snp, []).append(snp_n)
+    gene_valid_num = 10
+    if gene in dic_gene_negatives:
+        for gene_n in dic_gene_negatives[gene][0:50]:
+            if gene_n in dic_gene_snps_benign and gene_valid_num > 0 and gene_n in dic_gene_emb:
+                gene_valid_num -= 1
+                snps_temp = dic_gene_snps_benign[gene_n]
+                for snp_n in random.choices(snps_temp, k=2):
+                    if snp_n in dic_snps_emb:
+                        dic_snp_negative_snps.setdefault(snp, []).append(snp_n)
+    # if not snp in dic_snp_negative_snps:
+    #     dic_snp_negative_snps.setdefault(snp, []).append(random.choice(snps_labeled_all))
+    # dic_snp_negative_snps.setdefault(snp, []).append(gene)
+print("---dic_snp_positive_snps len---: ", len(dic_snp_positive_snps))
+print("---dic_snp_negative_snps len---: ", len(dic_snp_negative_snps))
+snps_all_benign = list(dic_snps_benign.keys())
 
-                f = open(dirr_results_main + filename_eval, 'a')
-                f.write("Time_pre: %2f min, weight_vae: %2f, AUC_train :%4f, AUC_overall:%4f, AUC_snps:%4f, AUC_disease:%4f,"
-                            " prc_overall :%4f, prc_overall_gain :%4f, PRC_snps :%4f, PRC_disease:%4f,"
-                        " MRR:%4f, recall10:%4f, recall50:%4f , rank_mean:%2f, rank_median:%2f " %
-                        (time_preprocessing, weight_vae,AUC_overall_train, np.mean(AUC_overall), np.mean(AUC_SNPs),  np.mean(AUC_cuis),
-                                PRC_overall, PRC_overall_gain, np.mean(PRC_SNPs),  np.mean(PRC_cuis), MRR,recall10,recall50,np.mean(rank_total),np.median(rank_total)))
-                f.write("\r")
-                f.close()
-                print("------------------------------------------------- saving predictions end-----------------------------------")
+if True:
+    for snp in dic_snps_gene:
+        gene = dic_snps_gene[snp]
+        if gene in dic_gene_emb:
+            if not snp in dic_snp_positive_snps:  #############if not positive SNPs included, include the neighboring SNPs as the postives based on the contiguity of functional domains
+                position = str(snp).split(".")[-1]
+                position = extract_number(position)
+                for snp_p in dic_gene_snps[gene][0:300]:
+                    if not snp_p == snp and snp_p in dic_snps_emb and snp_p in dic_snps_gene and snp_p in snps_patho_all:
+                        position_p = str(snp_p).split(".")[-1]
+                        position_p = extract_number(position_p)
+                        if abs(position_p - position) < 12:
+                            dic_snp_positive_snps.setdefault(snp, []).append(snp_p)
 
-                np.save(dirr_results + "feature_test_snps", np.array(feature_snps_save))
-                np.save(dirr_results + "feature_test_disease", np.array(feature_cuis_save))
+            if not snp in dic_snp_positive_snps:  #####if no postives, then include itself as the positive
+                dic_snp_positive_snps.setdefault(snp, []).append(snp)
 
-                df = pd.DataFrame({})
-                df["MRR"] = MRR_save
-                df["snps"] = MRR_SNP
-                df["CUI"]=MRR_CUI
-                df["rank"]=Ranking_save
-                df.to_csv(dirr_results + "MRR_snps.csv", index=False)
+            if not snp in dic_snp_negative_snps:  #####if no negatives, then include the benign snps on the genes with higher similarity to its gene
+                gene_valid_num = 10
+                if gene in dic_gene_negatives:
+                    for gene_n in dic_gene_negatives[gene][0:50]:
+                        if gene_n in dic_gene_snps_benign and gene_valid_num > 0 and gene_n in dic_gene_emb:
+                            gene_valid_num -= 1
+                            snps_temp = dic_gene_snps_benign[gene_n]
+                            for snp_n in random.choices(snps_temp, k=2):
+                                if snp_n in dic_snps_emb:
+                                    dic_snp_negative_snps.setdefault(snp, []).append(snp_n)
+
+                while (not snp in dic_snp_negative_snps) or len(dic_snp_negative_snps[
+                                                                    snp]) < gene_valid_num:  #####if no negatives, then include any benign snps
+                    snp_n = random.choice(snps_all_benign)
+                    if snp_n in dic_snps_gene and dic_snps_gene[snp_n] in dic_gene_emb:
+                        dic_snp_negative_snps.setdefault(snp, []).append(snp_n)
+
+print("---dic_snp_positive_snps final len---: ", len(dic_snp_positive_snps))
+print("---dic_snp_negative_snps final len---: ", len(dic_snp_negative_snps))
 
 
+############################################getting training data#######################################################
+def loaddata(train_snps_ratio=0.9, negative_disease=10, negative_snps=10, flag_hard_mining=1, negative_num_max=6,
+             snps_remove=["test"],
+             flag_debug=0, flag_negative_filter=1, similarith_N_threshold_max=0.75, similarith_N_threshold_min=-5.1,
+             flag_cross_gene=0, flag_cross_cui=0):
+    print("loaddata beginning....")
 
+    weight_ppi_interface = 4.0
+    weight_ppi_hint_hq = 0.2
+    weight_ppi_hint = 0.15
+    weight_ppi_hiu = 0.1
+    weight_domain = 2.0
 
-                df=pd.DataFrame({})
-                df["snps"]=snpsname_save
-                df["cui"]=cuiname_save
-                df.to_csv(dirr_results+"snps_cuis_names_test.csv",index=False)
+    snps_total = list(set(list(dic_snps_cui.keys())))
+    snps_total = list(snps_total)
+    random.shuffle(snps_total)
+    if flag_cross_gene > 0:
+        genes_total_label = list(dic_gene_label.keys())
+        random.shuffle(genes_total_label)
+        gene_train = genes_total_label[0:int(len(genes_total_label) * train_snps_ratio)]
+        gene_test = genes_total_label[int(len(genes_total_label) * train_snps_ratio):]
+        snps_train = []
+        snps_test = []
+        for snp_i in snps_total:
+            gene_i = dic_snps_gene[snp_i]
+            if gene_i in gene_train:
+                snps_train.append(snp_i)
+            else:
+                snps_test.append(snp_i)
+    else:
+        snps_train = snps_total[0:int(len(snps_total) * train_snps_ratio)]
+        snps_test = snps_total[int(len(snps_total) * train_snps_ratio):]
 
-                ##################################
-                print ("--------------------begin saving training features of snps-dsiease paris-------------------------------")
-                CUIs_embedding_train = []
-                snps_embedding_train=[]
-                gene_embedding_train=[]
-                cuiname_save = []
-                snpsname_save = []
-                for snps_index,cui,emb_gene in zip(eval_SNPs_train,eval_cui_train,eval_gene_train):
-                    snps = dic_index_snps[snps_index]
-                    snps_embedding_train.append(dic_snpsname_emb_all[snps])
-                    CUIs_embedding_train.append(dic_cui_emb[str(cui)])
-                    gene_embedding_train.append(emb_gene)
+    cuis_total_label = list(dic_cui_valid.keys())
+    if flag_cross_cui > 0:
+        random.shuffle(cuis_total_label)
+        CUI_train = set(cuis_total_label[0:int(len(cuis_total_label) * train_snps_ratio)])
+        CUI_test = set(cuis_total_label[int(len(cuis_total_label) * train_snps_ratio):])
+        snps_train = snps_total
+        snps_test = snps_test
+    else:
+        CUI_train = cuis_total_label
+        CUI_test = cuis_total_label
 
-                    cuiname_save.append(cui)
-                    snpsname_save.append(snps)
+    snps_benign_all_train_test = list(dic_snps_benign.keys())
+    random.shuffle(snps_benign_all_train_test)
+    snps_benign_train = snps_benign_all_train_test[0:int(len(snps_benign_all_train_test) * train_snps_ratio)]
+    snps_benign_test = snps_benign_all_train_test[int(len(snps_benign_all_train_test) * train_snps_ratio):]
 
-                for i in range(batch_size*1):
-                    index_i=random.randint(0,len(snps_embedding_train)-1)
-                    snps_embedding_train.append(snps_embedding_train[index_i])
-                    CUIs_embedding_train.append(CUIs_embedding_train[index_i])
-                    gene_embedding_train.append(gene_embedding_train[index_i])
+    number_hard_negative = 0
+    number_hard_negative_unlabel = 0
+    number_hard_negative_gene = 0
+    dic_gene_hit_as_unlabel = {}
+    dic_gene_hit_as_benign = {}
+    dic_gene_train = {}
+    print('loaddata begin...')
+    traindata_cuis = []
+    traindata_snps = []
+    traindata_snps_positive = []
+    traindata_snps_positive_gene = []
+    traindata_snps_negative = []
+    traindata_snps_negative_gene = []
 
-                    cuiname_save.append(cuiname_save[index_i])
-                    snpsname_save.append(snpsname_save[index_i])
+    traindata_cuis_P = []
+    traindata_snps_P = []
+    traindata_gene_P = []
 
-                snps_embedding_train = np.array(snps_embedding_train)
-                snps_embedding_train = tf.convert_to_tensor(snps_embedding_train, dtype=tf.float32)
-                CUIs_embedding_train = np.array(CUIs_embedding_train)
-                CUIs_embedding_train = tf.convert_to_tensor(CUIs_embedding_train, dtype=tf.float32)
-                gene_embedding_train = np.array(gene_embedding_train)
-                gene_embedding_train = tf.convert_to_tensor(gene_embedding_train, dtype=tf.float32)
+    train_gene = []
+    train_gene_weight = []
+    train_gene_PPI_p1 = []
+    train_gene_PPI_p1_gene = []
+    train_gene_PPI_p1_weight = []
+    train_gene_PPI_p2 = []
+    train_gene_PPI_p2_gene = []
+    traindata_Y = []
+    train_pair = []
+    traindata_names = []
+    testdata_cuis = []
+    testdata_snps = []
+    testdata_gene = []
+    testdata_Y = []
+    testdata_names = []
+    test_pair = []
+    unlabel_snps = []
+    unlabel_gene = []
+    unlabel_disease = []
+    snps_total = list(set(list(dic_snps_cui.keys())))
+    snps_total = list(snps_total)
+    random.shuffle(snps_total)
+    dic_snps_unlabeled = {}
+    dic_snps_unlabeled_gene = {}
 
-                feature_snps_save=[]
-                feature_cuis_save=[]
-                batch_max=int(len(CUIs_embedding_train)/batch_size)-2
-                for batch_i in range(batch_max):
-                    prediction, loss_vae, feature_snps, feature_cuis,feature_temp1_,feature_temp2_,feature_snp_mean,_,_ =\
-                        model( [snps_embedding_train[batch_i*batch_size:(batch_i+1)*batch_size,:],
-                                CUIs_embedding_train[batch_i*batch_size:(batch_i+1)*batch_size,:],
-                             snps_embedding_train[batch_i*batch_size:(batch_i+1)*batch_size,:],
-                                gene_embedding_train[batch_i * batch_size:(batch_i + 1) * batch_size, :],
-                             CUIs_embedding_train[batch_i*batch_size:(batch_i+1)*batch_size,:],
-                            gene_embedding_train[batch_i*batch_size:(batch_i+1)*batch_size,:],
-                                snps_embedding_train[batch_i*batch_size:(batch_i+1)*batch_size,:],
-                                gene_embedding_train[batch_i*batch_size:(batch_i+1)*batch_size,:],
-                                snps_embedding_train[batch_i*batch_size:(batch_i+1)*batch_size,:],
-                                snps_embedding_train[batch_i*batch_size:(batch_i+1)*batch_size,:],
-                                snps_embedding_train[batch_i*batch_size:(batch_i+1)*batch_size,:],
-                                snps_embedding_train[batch_i*batch_size:(batch_i+1)*batch_size,:]])
-                    feature_snps_save.append(feature_snps)
-                    feature_cuis_save.append(feature_cuis)
-                feature_snps_save=np.array(feature_snps_save).reshape((batch_size*batch_max,latent_dim))
-                feature_cuis_save = np.array(feature_cuis_save).reshape((batch_size * batch_max, latent_dim))
-                np.save(dirr_results + "feature_train_snps", np.array(feature_snps_save))
-                np.save(dirr_results + "feature_train_disease", np.array(feature_cuis_save))
+    if flag_debug > 0:
+        snps_total = list(snps_total)
+        random.shuffle(snps_total)
+        snps_total = snps_total[0:1000]
+        negative_disease = 1
+        negative_snps = 1
 
-                df = pd.DataFrame({})
-                df["snps"] = snpsname_save[0:batch_size*batch_max]
-                df["cui"] = cuiname_save[0:batch_size*batch_max]
-                df.to_csv(dirr_results + "snps_cuis_names_train.csv", index=False)
-                print("--------------------end saving training features of snps-dsiease paris-------------------------------")
+    eval_SNPs = []
+    eval_index = []
+    eval_SNPs_train = []
+    eval_cui_train = []
+    eval_gene_train = []
+    cuis_all = list(dic_cui_emb.keys())
+    snps_all = list(dic_snps_emb.keys())
+    eval_gene_test = []
 
-                ##################################
-                if flag_save_unlabel_emb>0:
-                    print( "--------------------begin saving unlabeled  snps-------------------------------")
-                    CUIs_embedding_train = []
-                    snps_embedding_train = []
-                    snpsname_un=[]
-                    cuis_all = list(pd.read_csv(dirr + file_CUIs_target)["CUIs"])
-                    snps_all=list(snps_all_un_prediction)#  list(set(list(dic_snpsname_emb_un.keys()))-set(snps_labeled_all))
-                    gene_embedding_train=[]
-                    print("snps_all to be predicted: ",len(snps_all))
+    dic_gene_train = {}
+    dic_gene_train_in_benigh = {}
 
-                    # snps_all=list(set(snps_all)-set(eval_SNPs)-set(eval_SNPs_train))
-                    for samplei in range(len(snps_all)):
-                        index_cui=random.randint(0,len(cuis_all)-1)
-                        #index_snps =samplei# random.randint(0, len(snps_all) - 1)
-                        snps=snps_all[samplei]
-                        if snps in dic_snps_gene:
-                            gene=dic_snps_gene[snps]
-                            snps_embedding_train.append(dic_snpsname_emb_all[snps])
-                            CUIs_embedding_train.append(dic_cui_emb[cuis_all[index_cui]])
-                            gene_embedding_train.append(dic_gene_emb[gene])
-                            snpsname_un.append(snps)
-                    snps_embedding_train = np.array(snps_embedding_train)
-                    snps_embedding_train = tf.convert_to_tensor(snps_embedding_train, dtype=tf.float32)
-                    CUIs_embedding_train = np.array(CUIs_embedding_train)
-                    CUIs_embedding_train = tf.convert_to_tensor(CUIs_embedding_train, dtype=tf.float32)
-                    gene_embedding_train = np.array(gene_embedding_train)
-                    gene_embedding_train = tf.convert_to_tensor(gene_embedding_train, dtype=tf.float32)
+    snps_number = 0
+    for snps in snps_total:
 
-                    feature_snps_save = []
-                    batch_max = int(len(CUIs_embedding_train) / batch_size)-1
-                    for batch_i in range(batch_max):
-                        prediction, loss_vae, feature_snps, feature_cuis , feature_temp1_, feature_temp2_,feature_snp_mean,_,_= model(
-                            [snps_embedding_train[batch_i * batch_size:(batch_i + 1) * batch_size,:],
-                             CUIs_embedding_train[batch_i * batch_size:(batch_i + 1) * batch_size,:],
-                             snps_embedding_train[batch_i * batch_size: (batch_i + 1) * batch_size,:],
-                             gene_embedding_train[batch_i * batch_size: (batch_i + 1) * batch_size, :],
-                             CUIs_embedding_train[batch_i * batch_size: (batch_i + 1) * batch_size,:],
-                             gene_embedding_train[batch_i * batch_size: (batch_i + 1) * batch_size,:],
-                             snps_embedding_train[batch_i * batch_size: (batch_i + 1) * batch_size,:],
-                             gene_embedding_train[batch_i * batch_size: (batch_i + 1) * batch_size,:],
-                             snps_embedding_train[batch_i * batch_size: (batch_i + 1) * batch_size,:],
-                             snps_embedding_train[batch_i * batch_size: (batch_i + 1) * batch_size,:],
-                             snps_embedding_train[batch_i * batch_size: (batch_i + 1) * batch_size,:],
-                             snps_embedding_train[batch_i * batch_size: (batch_i + 1) * batch_size,:]])
-                        feature_snps_save.append(feature_snps)
-                    feature_snps_save = np.array(feature_snps_save).reshape((batch_size * batch_max, latent_dim))
-                    print ("feature_snps_save shape: ",feature_snps_save.shape)
-                    np.save(dirr_results + "feature_unlabel_snps", np.array(feature_snps_save))
+        cui_labeled = set(dic_snps_cui[snps])
+        cui_unlabeled = list(set(CUIs_all_covered) - set(cui_labeled))
 
-                    df = pd.DataFrame({})
-                    df["snps"] = snpsname_un[0:batch_size * batch_max]
-                    df.to_csv(dirr_results + "snps_names_unlabel.csv", index=False)
-                    print( "--------------------end saving unlabeled  snps-------------------------------")
+        snps_number += 1
+        # if snps_number%5==0:
+        #     print("snps_number:  ",snps_number, "len cui_unlabeled: ",len(cui_unlabeled))
 
-                if flag_save_unlabel_predict > 0:
-                    print(
-                        "-------------------- begin saving unlabeled  snps  predictions-------------------------------")
-                    if content_unlabel == "UDN_CUI":
+        cui_label_embedding = []
+        cui_unlabel_embedding = []
+        for cui_l in cui_labeled:
+            cui_label_embedding.append(dic_cui_emb[cui_l])
+        for cui_un in cui_unlabeled:
+            cui_unlabel_embedding.append(dic_cui_emb[cui_un])
+        if flag_negative_filter > 0:
+            cui_unlabeled_filtered = []
+            cui_label_embedding = np.array(cui_label_embedding)
+            cui_unlabel_embedding = np.array(cui_unlabel_embedding)
+            # print("cui_label_embedding shape: ",cui_label_embedding.shape)
+            # print("cui_unlabel_embedding shape: ", cui_unlabel_embedding.shape)
+            similarity_un_l = cosine_similarity(cui_unlabel_embedding, cui_label_embedding)
+            # print ("similarity_un_l shape: ",similarity_un_l.shape)
+            # print("similarity_un_l min: ", np.min(similarity_un_l))
+            # print("similarity_un_l max: ", np.max(similarity_un_l))
+            # print("cui_unlabeled len: ",len(cui_unlabeled))
+            for rowi in range(len(cui_unlabeled)):
+                if np.max(similarity_un_l[rowi, :]) < similarith_N_threshold_max and np.max(
+                        similarity_un_l[rowi, :]) > similarith_N_threshold_min \
+                        and not cui_unlabeled[rowi] == "others":
+                    cui_unlabeled_filtered.append(cui_unlabeled[rowi])
+            # print("cui_unlabeled_filtered len: ", len(cui_unlabeled_filtered))
+            cui_unlabeled = cui_unlabeled_filtered
 
-                        CUIs_all_covered = list(pd.read_csv(dirr + file_CUIs_target)["CUIs"])
-                        print("---CUIs_all_covered: ", len(CUIs_all_covered))
-                    elif content_unlabel == "UDN_HPO":
-                        CUIs_all_covered = list(pd.read_csv(dirr + file_CUIs_target_UDN)["HPO"])
-                        print("---CUIs_all_covered UDN to be predicted: ", len(CUIs_all_covered))
+        if snps in snps_train:  ###training SNPs
+            if flag_cross_cui > 0:
+                cui_labeled = set(dic_snps_cui[snps]) - CUI_test
+                cui_unlabeled = list(set(CUIs_all_covered) - set(cui_labeled) - set(CUI_test))
+            else:
+                cui_labeled = set(dic_snps_cui[snps])
+                cui_unlabeled = list(set(CUIs_all_covered) - set(cui_labeled))
 
+            if len(cui_labeled) > 0:
+                for cui in cui_labeled:
+                    eval_SNPs_train.append(int(dic_snps_index[snps]))
+                    eval_cui_train.append(cui)
+                    gene = dic_snps_gene[snps]
+                    dic_gene_train[gene] = 1
+                    eval_gene_train.append(dic_gene_emb[gene])
+
+                    traindata_cuis_P.append(dic_cui_emb[cui])
+                    traindata_snps_P.append(dic_snps_emb[snps])
+                    traindata_gene_P.append(dic_gene_emb[gene])
+
+                    traindata_cuis.append(dic_cui_emb[cui])
+                    traindata_snps.append(dic_snps_emb[snps])
+                    snps_p_temp = random.choice(dic_snp_positive_snps[snps])
+                    traindata_snps_positive.append(dic_snps_emb[snps_p_temp])
+                    traindata_snps_positive_gene.append(dic_gene_emb[dic_snps_gene[snps_p_temp]])
+                    snps_N_temp = random.choice(dic_snp_negative_snps[snps])
+                    traindata_snps_negative.append(dic_snps_emb[snps_N_temp])
+                    traindata_snps_negative_gene.append(dic_gene_emb[dic_snps_gene[snps_N_temp]])
+
+                    gene = dic_snps_gene[snps]
+                    train_gene.append(dic_gene_emb[gene])
+                    train_gene_weight.append(dic_gene_weight[gene])
+                    traindata_Y.append(1.0)
+
+                    if snps in dic_snps_PPI_interface_positives:
+                        snps_temp = random.choice(dic_snps_PPI_interface_positives[snps])
+                        train_gene_PPI_p1.append(dic_snps_emb[snps_temp])
+                        train_gene_PPI_p1_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                        snps_temp = random.choice(dic_snps_PPI_interface_negatives[snps])
+                        train_gene_PPI_p2.append(dic_snps_emb[snps_temp])
+                        train_gene_PPI_p2_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                        train_gene_PPI_p1_weight.append(weight_ppi_interface)
+                    elif snps in dic_snps_domain_positives:
+                        snps_temp = random.choice(dic_snps_domain_positives[snps])
+                        train_gene_PPI_p1.append(dic_snps_emb[snps_temp])
+                        train_gene_PPI_p1_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                        snps_temp = random.choice(dic_snps_domain_negatives[snps])
+                        train_gene_PPI_p2.append(dic_snps_emb[snps_temp])
+                        train_gene_PPI_p2_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                        train_gene_PPI_p1_weight.append(weight_domain)
+                    elif snps in dic_snps_PPI_HINT_HQ_positives:
+                        snps_temp = random.choice(dic_snps_PPI_HINT_HQ_positives[snps])
+                        train_gene_PPI_p1.append(dic_snps_emb[snps_temp])
+                        train_gene_PPI_p1_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                        snps_temp = random.choice(dic_snps_PPI_HINT_HQ_negatives[snps])
+                        train_gene_PPI_p2.append(dic_snps_emb[snps_temp])
+                        train_gene_PPI_p2_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                        train_gene_PPI_p1_weight.append(weight_ppi_hint_hq)
+                    elif snps in dic_snps_PPI_HINT_positives:
+                        snps_temp = random.choice(dic_snps_PPI_HINT_positives[snps])
+                        train_gene_PPI_p1.append(dic_snps_emb[snps_temp])
+                        train_gene_PPI_p1_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                        snps_temp = random.choice(dic_snps_PPI_HINT_negatives[snps])
+                        train_gene_PPI_p2.append(dic_snps_emb[snps_temp])
+                        train_gene_PPI_p2_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                        train_gene_PPI_p1_weight.append(weight_ppi_hint)
+                    elif snps in dic_snps_PPI_HIU_positives:
+                        snps_temp = random.choice(dic_snps_PPI_HIU_positives[snps])
+                        train_gene_PPI_p1.append(dic_snps_emb[snps_temp])
+                        train_gene_PPI_p1_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                        snps_temp = random.choice(dic_snps_PPI_HIU_negatives[snps])
+                        train_gene_PPI_p2.append(dic_snps_emb[snps_temp])
+                        train_gene_PPI_p2_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                        train_gene_PPI_p1_weight.append(weight_ppi_hiu)
                     else:
-                        CUIs_all_covered = list(pd.read_csv(dirr +  file_CUIs_target)["CUIs"])
-                        print("---CUIs_all_covered: ", len(CUIs_all_covered))
+                        train_gene_PPI_p1.append(dic_snps_emb[snps])
+                        train_gene_PPI_p1_gene.append(dic_gene_emb[dic_snps_gene[snps]])
+                        train_gene_PPI_p2.append(dic_gene_emb[gene])
+                        train_gene_PPI_p2_gene.append(dic_gene_emb[gene])
+                        train_gene_PPI_p1_weight.append(1.0)
 
-                    CUIs_embedding_test = []
-                    add_num= batch_size-len(CUIs_all_covered)%batch_size
-                    batch_size_test = len(CUIs_all_covered)+add_num
-                    for cui in CUIs_all_covered:
-                        CUIs_embedding_test.append(dic_cui_emb[str(cui)])
-                    for addi in range(add_num):
-                        CUIs_embedding_test.append(CUIs_embedding_test[random.randint(0,batch_size)])
-                    CUIs_embedding_test = np.array(CUIs_embedding_test)
-                    CUIs_embedding_test_input = tf.convert_to_tensor(CUIs_embedding_test, dtype=tf.float32)
-                    snps_all = list(snps_all_un_prediction)  #
+                    traindata_Y.append(1.0)
+                    traindata_names.append(int(dic_snps_index[snps]))
+                    snps_unlabel_i = snps_with_embedding_gene[random.randint(0, len(snps_with_embedding_gene) - 1)]
+                    gene_unlabel_i = dic_snps_gene[snps_unlabel_i]
+                    unlabel_gene.append(dic_gene_emb[gene_unlabel_i])
+                    unlabel_snps.append(dic_snps_emb[snps_unlabel_i])
+                    unlabel_disease.append(dic_cui_emb[cuis_all[random.randint(0, len(cuis_all) - 1)]])
 
-                    snps_num_predict = 0
-                    feature_snps_save = []
-                    feature_disease_save=[]
+                    dic_snps_unlabeled[snps_unlabel_i] = 1
+                    dic_snps_unlabeled_gene[gene_unlabel_i] = 1
 
-                    snps_save_all = []
-                    data_save_all = []
-                    batch_max = int(batch_size_test / batch_size)
-                    CUI_save_all = []
-                    score_save_all = []
+                    index_random = random.randint(0, len(traindata_cuis_P) - 1)
+                    traindata_cuis_P.append(traindata_cuis_P[index_random])
+                    traindata_snps_P.append(traindata_snps_P[index_random])
 
-                    dic_snp_score = {}
-                    dic_snp_cuis = {}
+                    traindata_gene_P.append(traindata_gene_P[index_random])
 
-                    top_N=100
-                    if  content_unlabel == "UDN_CUI" or  content_unlabel == "UDN_HPO" or "shilpa" in content_unlabel or "year" in content_unlabel or "OMIM" in content_unlabel:
-                        top_N=len(CUIs_all_covered)
+                    traindata_cuis.append(dic_cui_emb["benign"])
+                    traindata_snps.append(dic_snps_emb[snps])
 
-                    top_N = len(CUIs_all_covered)
-                    for snps in snps_all[0:50000]:
-                        if snps==snps and snps in dic_snpsname_emb_all:
-                            snps_num_predict += 1
-                            embedding_snps = dic_snpsname_emb_all[snps]
-                            embedding_snps = np.tile(embedding_snps, (batch_size_test, 1))
-                            embedding_snps_input = tf.convert_to_tensor(embedding_snps, dtype=tf.float32)
-                            embedding_gene = dic_gene_emb[dic_snps_gene[snps]]
-                            embedding_gene = np.tile(embedding_gene, (batch_size_test, 1))
-                            embedding_gene_input = tf.convert_to_tensor(embedding_gene, dtype=tf.float32)
+                    snps_p_temp = random.choice(dic_snp_positive_snps[snps])
+                    traindata_snps_positive.append(dic_snps_emb[snps_p_temp])
+                    traindata_snps_positive_gene.append(dic_gene_emb[dic_snps_gene[snps_p_temp]])
+                    snps_N_temp = random.choice(dic_snp_negative_snps[snps])
+                    traindata_snps_negative.append(dic_snps_emb[snps_N_temp])
+                    traindata_snps_negative_gene.append(dic_gene_emb[dic_snps_gene[snps_N_temp]])
 
-                            prediction_all = []
-                            feature_snps_all = []
-                            feature_cuis_all = []
-                            for batch_i in range(batch_max):
-                                prediction, loss_vae, feature_snps, feature_cuis,feature_temp1_,feature_temp2_,feature_snp_mean,_,_ = model(
-                                    [embedding_snps_input[batch_i * batch_size:(batch_i + 1) * batch_size, :],
-                                     CUIs_embedding_test_input[batch_i * batch_size:(batch_i + 1) * batch_size, :],
-                                     embedding_snps_input[batch_i * batch_size:(batch_i + 1) * batch_size, :],
-                                     embedding_gene_input[batch_i * batch_size:(batch_i + 1) * batch_size, :],
-                                     CUIs_embedding_test_input[batch_i * batch_size:(batch_i + 1) * batch_size, :],
-                                     embedding_gene_input[batch_i * batch_size:(batch_i + 1) * batch_size, :],
-                                     embedding_snps_input[batch_i * batch_size:(batch_i + 1) * batch_size, :],
-                                     embedding_gene_input[batch_i * batch_size:(batch_i + 1) * batch_size, :],
-                                     embedding_snps_input[batch_i * batch_size:(batch_i + 1) * batch_size, :],
-                                     embedding_snps_input[batch_i * batch_size:(batch_i + 1) * batch_size, :],
-                                     embedding_snps_input[batch_i * batch_size:(batch_i + 1) * batch_size, :],
-                                     embedding_snps_input[batch_i * batch_size:(batch_i + 1) * batch_size, :]])
-                                prediction_all.append(prediction.numpy())
-                                feature_snps_all.append(feature_snps.numpy())
-                                feature_cuis_all.append(feature_cuis.numpy())
-                            prediction_all = np.array(prediction_all).reshape((batch_size * batch_max, -1))
-                            prediction_all = list(prediction_all)[0:len(CUIs_all_covered)]  # tf.nn.sigmoid(prediction)
+                    gene = dic_snps_gene[snps]
+                    train_gene.append(dic_gene_emb[gene])
+                    train_gene_weight.append(dic_gene_weight[gene])
 
-                            feature_snps_all = np.array(feature_snps_all).reshape((batch_size * batch_max, -1))
-                            feature_cuis_all = np.array(feature_cuis_all).reshape((batch_size * batch_max, -1))
+                    if snps in dic_snps_PPI_interface_positives:
+                        snps_temp = random.choice(dic_snps_PPI_interface_positives[snps])
+                        train_gene_PPI_p1.append(dic_snps_emb[snps_temp])
+                        train_gene_PPI_p1_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                        snps_temp = random.choice(dic_snps_PPI_interface_negatives[snps])
+                        train_gene_PPI_p2.append(dic_snps_emb[snps_temp])
+                        train_gene_PPI_p2_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                        train_gene_PPI_p1_weight.append(weight_ppi_interface)
+                    elif snps in dic_snps_domain_positives:
+                        snps_temp = random.choice(dic_snps_domain_positives[snps])
+                        train_gene_PPI_p1.append(dic_snps_emb[snps_temp])
+                        train_gene_PPI_p1_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                        snps_temp = random.choice(dic_snps_domain_negatives[snps])
+                        train_gene_PPI_p2.append(dic_snps_emb[snps_temp])
+                        train_gene_PPI_p2_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                        train_gene_PPI_p1_weight.append(weight_domain)
+                    elif snps in dic_snps_PPI_HINT_HQ_positives:
+                        snps_temp = random.choice(dic_snps_PPI_HINT_HQ_positives[snps])
+                        train_gene_PPI_p1.append(dic_snps_emb[snps_temp])
+                        train_gene_PPI_p1_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                        snps_temp = random.choice(dic_snps_PPI_HINT_HQ_negatives[snps])
+                        train_gene_PPI_p2.append(dic_snps_emb[snps_temp])
+                        train_gene_PPI_p2_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                        train_gene_PPI_p1_weight.append(weight_ppi_hint_hq)
+                    elif snps in dic_snps_PPI_HINT_positives:
+                        snps_temp = random.choice(dic_snps_PPI_HINT_positives[snps])
+                        train_gene_PPI_p1.append(dic_snps_emb[snps_temp])
+                        train_gene_PPI_p1_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                        snps_temp = random.choice(dic_snps_PPI_HINT_negatives[snps])
+                        train_gene_PPI_p2.append(dic_snps_emb[snps_temp])
+                        train_gene_PPI_p2_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                        train_gene_PPI_p1_weight.append(weight_ppi_hint)
+                    elif snps in dic_snps_PPI_HIU_positives:
+                        snps_temp = random.choice(dic_snps_PPI_HIU_positives[snps])
+                        train_gene_PPI_p1.append(dic_snps_emb[snps_temp])
+                        train_gene_PPI_p1_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                        snps_temp = random.choice(dic_snps_PPI_HIU_negatives[snps])
+                        train_gene_PPI_p2.append(dic_snps_emb[snps_temp])
+                        train_gene_PPI_p2_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                        train_gene_PPI_p1_weight.append(weight_ppi_hiu)
+                    else:
+                        train_gene_PPI_p1.append(dic_snps_emb[snps])
+                        train_gene_PPI_p1_gene.append(dic_gene_emb[dic_snps_gene[snps]])
+                        train_gene_PPI_p2.append(dic_gene_emb[gene])
+                        train_gene_PPI_p2_gene.append(dic_gene_emb[gene])
+                        train_gene_PPI_p1_weight.append(1.0)
 
-                            #feature_disease_save = feature_cuis_all[0:len(CUIs_all_covered), :]
-                            feature_snps_save.append(feature_snps_all[0])
+                    traindata_Y.append(0.0)
+                    traindata_names.append(int(dic_snps_index[snps]))
+                    snps_unlabel_i = snps_with_embedding_gene[random.randint(0, len(snps_with_embedding_gene) - 1)]
+                    gene_unlabel_i = dic_snps_gene[snps_unlabel_i]
+                    unlabel_gene.append(dic_gene_emb[gene_unlabel_i])
+                    unlabel_snps.append(dic_snps_emb[snps_unlabel_i])
+                    unlabel_disease.append(dic_cui_emb[cuis_all[random.randint(0, len(cuis_all) - 1)]])
 
-                            prediction_sort, CUIs_all_covered_sort = zip(*sorted(zip(prediction_all, CUIs_all_covered), reverse=True))
-                            # pair_save = []
-                            # for cui, pro in zip(CUIs_all_covered, prediction):
-                            #     pair_save.append(str(cui) + "_" + str(pro))
-                            #
-                            # data_save_all.append(pair_save)
-                            CUI_save_all.append(CUIs_all_covered_sort[0:top_N])
-                            score_save_all.append(prediction_sort[0:top_N])
-                            snps_save_all.append(snps)
-                            dic_snp_score[snps] = prediction_sort[0:top_N]
-                            dic_snp_cuis[snps] = CUIs_all_covered_sort[0:top_N]
+                    # train_pair.append(str(dic_snps_index[snps]) + "_"+cui)
+                    #################wildtype########### hard negative#################
+                    #################wildtype########### hard negative#################
+                    gene = dic_snps_gene[snps]
+                    traindata_cuis.append(dic_cui_emb[cui])
+                    traindata_snps.append(dic_gene_emb[gene])
 
-                            if True:  # content_unlabel=="ALL":
-                                if  snps_num_predict % 50000 == 0 or snps_num_predict == len(snps_all):
-                                    print("-------------snps_num_predict: ", snps_num_predict)
-                                    savename_unlabel_predict_final = str(
-                                        snps_num_predict) + "_CUI_" + savename_unlabel_predict
-                                    CUI_save_all = np.array(CUI_save_all).T
-                                    #np.save(dirr_results + savename_unlabel_predict_final, np.array(CUI_save_all[0:snps_num_predict]).T)
-                                    df = pd.DataFrame(CUI_save_all)
-                                    df.to_csv(dirr_results + savename_unlabel_predict_final, header=snps_save_all, index=False)
+                    snps_p_temp = random.choice(dic_snp_positive_snps[snps])
+                    traindata_snps_positive.append(dic_snps_emb[snps_p_temp])
+                    traindata_snps_positive_gene.append(dic_gene_emb[dic_snps_gene[snps_p_temp]])
+                    snps_N_temp = random.choice(dic_snp_negative_snps[snps])
+                    traindata_snps_negative.append(dic_snps_emb[snps_N_temp])
+                    traindata_snps_negative_gene.append(dic_gene_emb[dic_snps_gene[snps_N_temp]])
 
-                                    savename_unlabel_predict_final = str(
-                                        snps_num_predict) + "_score_" + savename_unlabel_predict
-                                    score_save_all = np.array(score_save_all).T
-                                    score_save_all = np.squeeze(score_save_all)
-                                    #np.save(dirr_results + savename_unlabel_predict_final, np.array(score_save_all[0:snps_num_predict]).T)
-                                    df = pd.DataFrame(score_save_all)
-                                    df.to_csv(dirr_results + savename_unlabel_predict_final, header=snps_save_all,index=False)
+                    index_random = random.randint(0, len(traindata_cuis_P) - 1)
+                    traindata_cuis_P.append(traindata_cuis_P[index_random])
+                    traindata_snps_P.append(traindata_snps_P[index_random])
+                    traindata_gene_P.append(traindata_gene_P[index_random])
 
-                                    savename_unlabel_predict_final = "FinalALL_CUI_" + savename_unlabel_predict
-                                    df = pd.DataFrame(dic_snp_cuis)
-                                    #df.to_csv(dirr_results + savename_unlabel_predict_final, index=False)
-                                    savename_unlabel_predict_final = "FinalALL_score_" + savename_unlabel_predict
-                                    # np.save(dirr_results + savename_unlabel_predict_final, np.array(CUI_save_all[0:snps_num_predict]).T)
-                                    df = pd.DataFrame(dic_snp_score)
-                                    #df.to_csv(dirr_results + savename_unlabel_predict_final, index=False)
+                    train_gene.append(dic_gene_emb[gene])
+                    train_gene_weight.append(dic_gene_weight[gene])
+
+                    if snps in dic_snps_PPI_interface_positives:
+                        snps_temp = random.choice(dic_snps_PPI_interface_positives[snps])
+                        train_gene_PPI_p1.append(dic_snps_emb[snps_temp])
+                        train_gene_PPI_p1_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                        snps_temp = random.choice(dic_snps_PPI_interface_negatives[snps])
+                        train_gene_PPI_p2.append(dic_snps_emb[snps_temp])
+                        train_gene_PPI_p2_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                        train_gene_PPI_p1_weight.append(weight_ppi_interface)
+                    elif snps in dic_snps_domain_positives:
+                        snps_temp = random.choice(dic_snps_domain_positives[snps])
+                        train_gene_PPI_p1.append(dic_snps_emb[snps_temp])
+                        train_gene_PPI_p1_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                        snps_temp = random.choice(dic_snps_domain_negatives[snps])
+                        train_gene_PPI_p2.append(dic_snps_emb[snps_temp])
+                        train_gene_PPI_p2_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                        train_gene_PPI_p1_weight.append(weight_domain)
+                    elif snps in dic_snps_PPI_HINT_HQ_positives:
+                        snps_temp = random.choice(dic_snps_PPI_HINT_HQ_positives[snps])
+                        train_gene_PPI_p1.append(dic_snps_emb[snps_temp])
+                        train_gene_PPI_p1_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                        snps_temp = random.choice(dic_snps_PPI_HINT_HQ_negatives[snps])
+                        train_gene_PPI_p2.append(dic_snps_emb[snps_temp])
+                        train_gene_PPI_p2_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                        train_gene_PPI_p1_weight.append(weight_ppi_hint_hq)
+                    elif snps in dic_snps_PPI_HINT_positives:
+                        snps_temp = random.choice(dic_snps_PPI_HINT_positives[snps])
+                        train_gene_PPI_p1.append(dic_snps_emb[snps_temp])
+                        train_gene_PPI_p1_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                        snps_temp = random.choice(dic_snps_PPI_HINT_negatives[snps])
+                        train_gene_PPI_p2.append(dic_snps_emb[snps_temp])
+                        train_gene_PPI_p2_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                        train_gene_PPI_p1_weight.append(weight_ppi_hint)
+                    elif snps in dic_snps_PPI_HIU_positives:
+                        snps_temp = random.choice(dic_snps_PPI_HIU_positives[snps])
+                        train_gene_PPI_p1.append(dic_snps_emb[snps_temp])
+                        train_gene_PPI_p1_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                        snps_temp = random.choice(dic_snps_PPI_HIU_negatives[snps])
+                        train_gene_PPI_p2.append(dic_snps_emb[snps_temp])
+                        train_gene_PPI_p2_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                        train_gene_PPI_p1_weight.append(weight_ppi_hiu)
+                    else:
+                        train_gene_PPI_p1.append(dic_snps_emb[snps])
+                        train_gene_PPI_p1_gene.append(dic_gene_emb[dic_snps_gene[snps]])
+                        train_gene_PPI_p2.append(dic_gene_emb[gene])
+                        train_gene_PPI_p2_gene.append(dic_gene_emb[gene])
+                        train_gene_PPI_p1_weight.append(1.0)
+
+                    traindata_Y.append(0.0)
+                    traindata_names.append(int(dic_snps_index[snps]))
+                    # train_pair.append(str(dic_snps_index[snps]) + "_" + cui)
+                    snps_unlabel_i = snps_with_embedding_gene[random.randint(0, len(snps_with_embedding_gene) - 1)]
+                    gene_unlabel_i = dic_snps_gene[snps_unlabel_i]
+                    unlabel_gene.append(dic_gene_emb[gene_unlabel_i])
+                    unlabel_snps.append(dic_snps_emb[snps_unlabel_i])
+                    dic_snps_unlabeled[snps_unlabel_i] = 1
+                    dic_snps_unlabeled_gene[gene_unlabel_i] = 1
+                    unlabel_disease.append(dic_cui_emb[cuis_all[random.randint(0, len(cuis_all) - 1)]])
+
+                    gene = dic_snps_gene[snps]
+                    dic_gene_train[gene] = 1
+                    if flag_hard_mining > 0 and gene in dic_gene_emb:
+
+                        traindata_cuis.append(dic_cui_emb["benign"])  # dic_gene_train[gene]=1
+                        traindata_snps.append(dic_gene_emb[gene][0:768])
+
+                        snps_p_temp = random.choice(dic_snp_positive_snps[snps])
+                        traindata_snps_positive.append(dic_snps_emb[snps_p_temp])
+                        traindata_snps_positive_gene.append(dic_gene_emb[dic_snps_gene[snps_p_temp]])
+                        snps_N_temp = random.choice(dic_snp_negative_snps[snps])
+                        traindata_snps_negative.append(dic_snps_emb[snps_N_temp])
+                        traindata_snps_negative_gene.append(dic_gene_emb[dic_snps_gene[snps_N_temp]])
+
+                        index_random = random.randint(0, len(traindata_cuis_P) - 1)
+                        traindata_cuis_P.append(traindata_cuis_P[index_random])
+                        traindata_snps_P.append(traindata_snps_P[index_random])
+                        traindata_gene_P.append(traindata_gene_P[index_random])
+                        train_gene.append(dic_gene_emb[gene])
+                        train_gene_weight.append(dic_gene_weight[gene])
+
+                        if snps in dic_snps_PPI_interface_positives:
+                            snps_temp = random.choice(dic_snps_PPI_interface_positives[snps])
+                            train_gene_PPI_p1.append(dic_snps_emb[snps_temp])
+                            train_gene_PPI_p1_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                            snps_temp = random.choice(dic_snps_PPI_interface_negatives[snps])
+                            train_gene_PPI_p2.append(dic_snps_emb[snps_temp])
+                            train_gene_PPI_p2_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                            train_gene_PPI_p1_weight.append(weight_ppi_interface)
+                        elif snps in dic_snps_domain_positives:
+                            snps_temp = random.choice(dic_snps_domain_positives[snps])
+                            train_gene_PPI_p1.append(dic_snps_emb[snps_temp])
+                            train_gene_PPI_p1_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                            snps_temp = random.choice(dic_snps_domain_negatives[snps])
+                            train_gene_PPI_p2.append(dic_snps_emb[snps_temp])
+                            train_gene_PPI_p2_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                            train_gene_PPI_p1_weight.append(weight_domain)
+                        elif snps in dic_snps_PPI_HINT_HQ_positives:
+                            snps_temp = random.choice(dic_snps_PPI_HINT_HQ_positives[snps])
+                            train_gene_PPI_p1.append(dic_snps_emb[snps_temp])
+                            train_gene_PPI_p1_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                            snps_temp = random.choice(dic_snps_PPI_HINT_HQ_negatives[snps])
+                            train_gene_PPI_p2.append(dic_snps_emb[snps_temp])
+                            train_gene_PPI_p2_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                            train_gene_PPI_p1_weight.append(weight_ppi_hint_hq)
+                        elif snps in dic_snps_PPI_HINT_positives:
+                            snps_temp = random.choice(dic_snps_PPI_HINT_positives[snps])
+                            train_gene_PPI_p1.append(dic_snps_emb[snps_temp])
+                            train_gene_PPI_p1_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                            snps_temp = random.choice(dic_snps_PPI_HINT_negatives[snps])
+                            train_gene_PPI_p2.append(dic_snps_emb[snps_temp])
+                            train_gene_PPI_p2_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                            train_gene_PPI_p1_weight.append(weight_ppi_hint)
+                        elif snps in dic_snps_PPI_HIU_positives:
+                            snps_temp = random.choice(dic_snps_PPI_HIU_positives[snps])
+                            train_gene_PPI_p1.append(dic_snps_emb[snps_temp])
+                            train_gene_PPI_p1_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                            snps_temp = random.choice(dic_snps_PPI_HIU_negatives[snps])
+                            train_gene_PPI_p2.append(dic_snps_emb[snps_temp])
+                            train_gene_PPI_p2_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                            train_gene_PPI_p1_weight.append(weight_ppi_hiu)
+                        else:
+                            train_gene_PPI_p1.append(dic_snps_emb[snps])
+                            train_gene_PPI_p1_gene.append(dic_gene_emb[dic_snps_gene[snps]])
+                            train_gene_PPI_p2.append(dic_gene_emb[gene])
+                            train_gene_PPI_p2_gene.append(dic_gene_emb[gene])
+                            train_gene_PPI_p1_weight.append(1.0)
+
+                        traindata_Y.append(1.0)
+                        traindata_names.append(int(dic_snps_index[snps]))
+
+                        # train_pair.append(str(dic_snps_index[snps]) + "_" + cui)
+
+                        snps_unlabel_i = snps_with_embedding_gene[random.randint(0, len(snps_with_embedding_gene) - 1)]
+                        gene_unlabel_i = dic_snps_gene[snps_unlabel_i]
+                        unlabel_gene.append(dic_gene_emb[gene_unlabel_i])
+                        unlabel_snps.append(dic_snps_emb[snps_unlabel_i])
+                        unlabel_disease.append(dic_cui_emb[cuis_all[random.randint(0, len(cuis_all) - 1)]])
+
+                        dic_snps_unlabeled[snps_unlabel_i] = 1
+                        dic_snps_unlabeled_gene[gene_unlabel_i] = 1
+
+                        if gene in dic_gene_benign:  ############ ###if in benign: benigns snps or other pathogeneic SNPs ###############
+                            dic_gene_train_in_benigh[gene] = 1
+                            number_hard_negative_gene += 1
+                            snps_benign = list(
+                                set(list(dic_gene_benign[gene])) - set(snps_test))  # list(dic_gene_benign[gene])
+
+                            snps_others = set(list(dic_gene_snps[gene])) - set(snps_test)
+                            snps_benign_same_gene = list(snps_others)  # .intersection(set(snps_train)))
+                            snps_benign_same_gene.extend(snps_benign)
+                            snps_benign_same_gene = snps_benign
+                            # snps_benign_same_gene.extend(snps_benign)
+                            # snps_benign_same_gene.extend(snps_benign)
+                            # snps_benign_same_gene.extend(snps_benign)
+                            dic_gene_hit_as_benign[gene] = 0
+                            num_temp = 0
+                            valid_total = 1  # min(negative_num_max,int(0.1*len(snps_benign_same_gene)))
+                            for samplei in range(30):
+                                snps_b = snps_benign_same_gene[random.randint(0, len(snps_benign_same_gene) - 1)]
+                                if num_temp < valid_total and not snps_b in dic_cui_snps[
+                                    cui] and snps_b in dic_snps_emb and dic_snps_gene[snps_b] in dic_gene_emb:
+                                    gene = dic_snps_gene[snps_b]
+                                    num_temp += 1
+                                    number_hard_negative += 1
+                                    traindata_cuis.append(dic_cui_emb["benign"])  # dic_cui_emb["benign"]
+                                    traindata_snps.append(dic_snps_emb[snps_b])
+
+                                    snps_p_temp = random.choice(dic_snp_positive_snps[snps])
+                                    traindata_snps_positive.append(dic_snps_emb[snps_p_temp])
+                                    traindata_snps_positive_gene.append(dic_gene_emb[dic_snps_gene[snps_p_temp]])
+                                    snps_N_temp = random.choice(dic_snp_negative_snps[snps])
+                                    traindata_snps_negative.append(dic_snps_emb[snps_N_temp])
+                                    traindata_snps_negative_gene.append(dic_gene_emb[dic_snps_gene[snps_N_temp]])
+
+                                    index_random = random.randint(0, len(traindata_cuis_P) - 1)
+                                    traindata_cuis_P.append(traindata_cuis_P[index_random])
+                                    traindata_snps_P.append(traindata_snps_P[index_random])
+                                    traindata_gene_P.append(traindata_gene_P[index_random])
+
+                                    train_gene.append(dic_gene_emb[gene])
+                                    if gene in dic_gene_weight:
+                                        train_gene_weight.append(dic_gene_weight[gene])
+                                    else:
+                                        train_gene_weight.append(gene_weghts_median)
+
+                                    if snps in dic_snps_PPI_interface_positives:
+                                        snps_temp = random.choice(dic_snps_PPI_interface_positives[snps])
+                                        train_gene_PPI_p1.append(dic_snps_emb[snps_temp])
+                                        train_gene_PPI_p1_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                                        snps_temp = random.choice(dic_snps_PPI_interface_negatives[snps])
+                                        train_gene_PPI_p2.append(dic_snps_emb[snps_temp])
+                                        train_gene_PPI_p2_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                                        train_gene_PPI_p1_weight.append(weight_ppi_interface)
+                                    elif snps in dic_snps_domain_positives:
+                                        snps_temp = random.choice(dic_snps_domain_positives[snps])
+                                        train_gene_PPI_p1.append(dic_snps_emb[snps_temp])
+                                        train_gene_PPI_p1_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                                        snps_temp = random.choice(dic_snps_domain_negatives[snps])
+                                        train_gene_PPI_p2.append(dic_snps_emb[snps_temp])
+                                        train_gene_PPI_p2_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                                        train_gene_PPI_p1_weight.append(weight_domain)
+                                    elif snps in dic_snps_PPI_HINT_HQ_positives:
+                                        snps_temp = random.choice(dic_snps_PPI_HINT_HQ_positives[snps])
+                                        train_gene_PPI_p1.append(dic_snps_emb[snps_temp])
+                                        train_gene_PPI_p1_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                                        snps_temp = random.choice(dic_snps_PPI_HINT_HQ_negatives[snps])
+                                        train_gene_PPI_p2.append(dic_snps_emb[snps_temp])
+                                        train_gene_PPI_p2_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                                        train_gene_PPI_p1_weight.append(weight_ppi_hint_hq)
+                                    elif snps in dic_snps_PPI_HINT_positives:
+                                        snps_temp = random.choice(dic_snps_PPI_HINT_positives[snps])
+                                        train_gene_PPI_p1.append(dic_snps_emb[snps_temp])
+                                        train_gene_PPI_p1_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                                        snps_temp = random.choice(dic_snps_PPI_HINT_negatives[snps])
+                                        train_gene_PPI_p2.append(dic_snps_emb[snps_temp])
+                                        train_gene_PPI_p2_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                                        train_gene_PPI_p1_weight.append(weight_ppi_hint)
+                                    elif snps in dic_snps_PPI_HIU_positives:
+                                        snps_temp = random.choice(dic_snps_PPI_HIU_positives[snps])
+                                        train_gene_PPI_p1.append(dic_snps_emb[snps_temp])
+                                        train_gene_PPI_p1_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                                        snps_temp = random.choice(dic_snps_PPI_HIU_negatives[snps])
+                                        train_gene_PPI_p2.append(dic_snps_emb[snps_temp])
+                                        train_gene_PPI_p2_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                                        train_gene_PPI_p1_weight.append(weight_ppi_hiu)
+                                    else:
+                                        train_gene_PPI_p1.append(dic_snps_emb[snps])
+                                        train_gene_PPI_p1_gene.append(dic_gene_emb[dic_snps_gene[snps]])
+                                        train_gene_PPI_p2.append(dic_gene_emb[gene])
+                                        train_gene_PPI_p2_gene.append(dic_gene_emb[gene])
+                                        train_gene_PPI_p1_weight.append(1.0)
+
+                                    traindata_Y.append(1.0)
+                                    traindata_names.append(int(dic_snps_index[snps]))
+
+                                    snps_unlabel_i = snps_with_embedding_gene[
+                                        random.randint(0, len(snps_with_embedding_gene) - 1)]
+                                    gene_unlabel_i = dic_snps_gene[snps_unlabel_i]
+                                    unlabel_gene.append(dic_gene_emb[gene_unlabel_i])
+                                    unlabel_snps.append(dic_snps_emb[snps_unlabel_i])
+                                    unlabel_disease.append(dic_cui_emb[cuis_all[random.randint(0, len(cuis_all) - 1)]])
+
+                            num_temp = 0
+                            for samplei in range(20):
+                                snps_b = snps_benign_same_gene[random.randint(0, len(snps_benign_same_gene) - 1)]
+                                if num_temp < 2 and not snps_b in dic_cui_snps[cui] and snps_b in dic_snps_emb and \
+                                        dic_snps_gene[snps_b] in dic_gene_emb:
+                                    num_temp += 1
+                                    gene = dic_snps_gene[snps_b]
+                                    traindata_cuis.append(dic_cui_emb[cui])
+                                    traindata_snps.append(dic_snps_emb[snps_b])
+                                    snps_p_temp = random.choice(dic_snp_positive_snps[snps])
+                                    traindata_snps_positive.append(dic_snps_emb[snps_p_temp])
+                                    traindata_snps_positive_gene.append(dic_gene_emb[dic_snps_gene[snps_p_temp]])
+                                    snps_N_temp = random.choice(dic_snp_negative_snps[snps])
+                                    traindata_snps_negative.append(dic_snps_emb[snps_N_temp])
+                                    traindata_snps_negative_gene.append(dic_gene_emb[dic_snps_gene[snps_N_temp]])
+
+                                    index_random = random.randint(0, len(traindata_cuis_P) - 1)
+                                    traindata_cuis_P.append(traindata_cuis_P[index_random])
+                                    traindata_snps_P.append(traindata_snps_P[index_random])
+                                    traindata_gene_P.append(traindata_gene_P[index_random])
+
+                                    index_random = random.randint(0, len(traindata_cuis_P) - 1)
+                                    traindata_cuis_P.append(traindata_cuis_P[index_random])
+                                    traindata_snps_P.append(traindata_snps_P[index_random])
+                                    traindata_gene_P.append(traindata_gene_P[index_random])
+
+                                    train_gene.append(dic_gene_emb[gene])
+                                    if gene in dic_gene_weight:
+                                        train_gene_weight.append(dic_gene_weight[gene])
+                                    else:
+                                        train_gene_weight.append(gene_weghts_median)
+
+                                    if snps in dic_snps_PPI_interface_positives:
+                                        snps_temp = random.choice(dic_snps_PPI_interface_positives[snps])
+                                        train_gene_PPI_p1.append(dic_snps_emb[snps_temp])
+                                        train_gene_PPI_p1_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                                        snps_temp = random.choice(dic_snps_PPI_interface_negatives[snps])
+                                        train_gene_PPI_p2.append(dic_snps_emb[snps_temp])
+                                        train_gene_PPI_p2_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                                        train_gene_PPI_p1_weight.append(weight_ppi_interface)
+                                    elif snps in dic_snps_domain_positives:
+                                        snps_temp = random.choice(dic_snps_domain_positives[snps])
+                                        train_gene_PPI_p1.append(dic_snps_emb[snps_temp])
+                                        train_gene_PPI_p1_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                                        snps_temp = random.choice(dic_snps_domain_negatives[snps])
+                                        train_gene_PPI_p2.append(dic_snps_emb[snps_temp])
+                                        train_gene_PPI_p2_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                                        train_gene_PPI_p1_weight.append(weight_domain)
+                                    elif snps in dic_snps_PPI_HINT_HQ_positives:
+                                        snps_temp = random.choice(dic_snps_PPI_HINT_HQ_positives[snps])
+                                        train_gene_PPI_p1.append(dic_snps_emb[snps_temp])
+                                        train_gene_PPI_p1_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                                        snps_temp = random.choice(dic_snps_PPI_HINT_HQ_negatives[snps])
+                                        train_gene_PPI_p2.append(dic_snps_emb[snps_temp])
+                                        train_gene_PPI_p2_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                                        train_gene_PPI_p1_weight.append(weight_ppi_hint_hq)
+                                    elif snps in dic_snps_PPI_HINT_positives:
+                                        snps_temp = random.choice(dic_snps_PPI_HINT_positives[snps])
+                                        train_gene_PPI_p1.append(dic_snps_emb[snps_temp])
+                                        train_gene_PPI_p1_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                                        snps_temp = random.choice(dic_snps_PPI_HINT_negatives[snps])
+                                        train_gene_PPI_p2.append(dic_snps_emb[snps_temp])
+                                        train_gene_PPI_p2_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                                        train_gene_PPI_p1_weight.append(weight_ppi_hint)
+                                    elif snps in dic_snps_PPI_HIU_positives:
+                                        snps_temp = random.choice(dic_snps_PPI_HIU_positives[snps])
+                                        train_gene_PPI_p1.append(dic_snps_emb[snps_temp])
+                                        train_gene_PPI_p1_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                                        snps_temp = random.choice(dic_snps_PPI_HIU_negatives[snps])
+                                        train_gene_PPI_p2.append(dic_snps_emb[snps_temp])
+                                        train_gene_PPI_p2_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                                        train_gene_PPI_p1_weight.append(weight_ppi_hiu)
+                                    else:
+                                        train_gene_PPI_p1.append(dic_snps_emb[snps])
+                                        train_gene_PPI_p1_gene.append(dic_gene_emb[dic_snps_gene[snps]])
+                                        train_gene_PPI_p2.append(dic_gene_emb[gene])
+                                        train_gene_PPI_p2_gene.append(dic_gene_emb[gene])
+                                        train_gene_PPI_p1_weight.append(1.0)
+
+                                    traindata_Y.append(0.0)
+                                    traindata_names.append(int(dic_snps_index[snps]))
+
+                                    snps_unlabel_i = snps_with_embedding_gene[
+                                        random.randint(0, len(snps_with_embedding_gene) - 1)]
+                                    gene_unlabel_i = dic_snps_gene[snps_unlabel_i]
+                                    unlabel_gene.append(dic_gene_emb[gene_unlabel_i])
+                                    unlabel_snps.append(dic_snps_emb[snps_unlabel_i])
+                                    unlabel_disease.append(dic_cui_emb[cuis_all[random.randint(0, len(cuis_all) - 1)]])
+
+        if snps in snps_test:  ###test SNPs
+            if len(cui_labeled) > 0:
+                if flag_cross_cui > 0:
+                    cui_labeled = set(dic_snps_cui[snps]) - CUI_train
+                    cui_unlabeled = list(set(CUIs_all_covered) - set(cui_labeled) - set(CUI_train))
+                else:
+                    cui_labeled = set(dic_snps_cui[snps])
+                    cui_unlabeled = list(set(CUIs_all_covered) - set(cui_labeled))
+
+                for cui in cui_labeled:
+                    eval_SNPs.append(int(dic_snps_index[snps]))
+                    eval_index.append(CUIs_all_covered.index(cui))
+
+                    gene = dic_snps_gene[snps]
+                    eval_gene_test.append(dic_gene_emb[gene])
+
+                    testdata_cuis.append(dic_cui_emb[cui])
+                    testdata_snps.append(dic_snps_emb[snps])
+                    gene = dic_snps_gene[snps]
+                    testdata_gene.append(dic_gene_emb[gene])
+
+                    testdata_Y.append(1.0)
+                    testdata_names.append(snps)
+                    test_pair.append(str(dic_snps_index[snps]) + "_" + cui)
+
+                num_negative = 0
+                for cui_i in range(negative_disease - 1):
+                    cui = cui_unlabeled[random.randint(0, len(cui_unlabeled) - 1)]
+                    num_negative = num_negative + 1
+                    testdata_cuis.append(dic_cui_emb[cui])
+                    testdata_snps.append(dic_snps_emb[snps])
+                    gene = dic_snps_gene[snps]
+                    testdata_gene.append(dic_gene_emb[gene])
+                    testdata_Y.append(0.0)
+                    testdata_names.append(snps)
+                    test_pair.append(str(dic_snps_index[snps]) + "_" + cui)
+
+                testdata_cuis.append(dic_cui_emb["benign"])
+                testdata_snps.append(dic_snps_emb[snps])
+                gene = dic_snps_gene[snps]
+                testdata_gene.append(dic_gene_emb[gene])
+                testdata_Y.append(0.0)
+                testdata_names.append(snps)
+                test_pair.append(str(dic_snps_index[snps]) + "_" + "benign")
+
+    snps_total_labeled = set(list(dic_snps_cui.keys()))
+    # snps_patho_all=set(snps_patho_all)-snps_total_labeled
+    snps_patho_all_others = snps_patho_all - snps_total_labeled
+    print("-------------------------snps_patho_all_others: ", len(snps_patho_all_others),
+          "---------without traints but pathogenic for training---------")
+    for snp in snps_patho_all_others:
+        if True:
+            gene = dic_snps_gene[snp]
+            traindata_cuis.append(dic_cui_emb["benign"])  # dic_cui_emb["benign"]
+            traindata_snps.append(dic_snps_emb[snp])
+
+            snps_p_temp = random.choice(dic_snp_positive_snps[snp])
+            traindata_snps_positive.append(dic_snps_emb[snps_p_temp])
+            traindata_snps_positive_gene.append(dic_gene_emb[dic_snps_gene[snps_p_temp]])
+            snps_N_temp = random.choice(dic_snp_negative_snps[snp])
+            traindata_snps_negative.append(dic_snps_emb[snps_N_temp])
+            traindata_snps_negative_gene.append(dic_gene_emb[dic_snps_gene[snps_N_temp]])
+
+            index_random = random.randint(0, len(traindata_cuis_P) - 1)
+            traindata_cuis_P.append(traindata_cuis_P[index_random])
+            traindata_snps_P.append(traindata_snps_P[index_random])
+            traindata_gene_P.append(traindata_gene_P[index_random])
+
+            index_random = random.randint(0, len(traindata_cuis_P) - 1)
+            traindata_cuis_P.append(traindata_cuis_P[index_random])
+            traindata_snps_P.append(traindata_snps_P[index_random])
+            traindata_gene_P.append(traindata_gene_P[index_random])
+
+            train_gene.append(dic_gene_emb[gene])
+            if gene in dic_gene_weight:
+                train_gene_weight.append(dic_gene_weight[gene])
+            else:
+                train_gene_weight.append(gene_weghts_median)
+
+            snps = snp
+            if snps in dic_snps_PPI_interface_positives:
+                snps_temp = random.choice(dic_snps_PPI_interface_positives[snps])
+                train_gene_PPI_p1.append(dic_snps_emb[snps_temp])
+                train_gene_PPI_p1_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                snps_temp = random.choice(dic_snps_PPI_interface_negatives[snps])
+                train_gene_PPI_p2.append(dic_snps_emb[snps_temp])
+                train_gene_PPI_p2_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                train_gene_PPI_p1_weight.append(weight_ppi_interface)
+            elif snps in dic_snps_domain_positives:
+                snps_temp = random.choice(dic_snps_domain_positives[snps])
+                train_gene_PPI_p1.append(dic_snps_emb[snps_temp])
+                train_gene_PPI_p1_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                snps_temp = random.choice(dic_snps_domain_negatives[snps])
+                train_gene_PPI_p2.append(dic_snps_emb[snps_temp])
+                train_gene_PPI_p2_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                train_gene_PPI_p1_weight.append(weight_domain)
+            elif snps in dic_snps_PPI_HINT_HQ_positives:
+                snps_temp = random.choice(dic_snps_PPI_HINT_HQ_positives[snps])
+                train_gene_PPI_p1.append(dic_snps_emb[snps_temp])
+                train_gene_PPI_p1_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                snps_temp = random.choice(dic_snps_PPI_HINT_HQ_negatives[snps])
+                train_gene_PPI_p2.append(dic_snps_emb[snps_temp])
+                train_gene_PPI_p2_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                train_gene_PPI_p1_weight.append(weight_ppi_hint_hq)
+            elif snps in dic_snps_PPI_HINT_positives:
+                snps_temp = random.choice(dic_snps_PPI_HINT_positives[snps])
+                train_gene_PPI_p1.append(dic_snps_emb[snps_temp])
+                train_gene_PPI_p1_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                snps_temp = random.choice(dic_snps_PPI_HINT_negatives[snps])
+                train_gene_PPI_p2.append(dic_snps_emb[snps_temp])
+                train_gene_PPI_p2_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                train_gene_PPI_p1_weight.append(weight_ppi_hint)
+            elif snps in dic_snps_PPI_HIU_positives:
+                snps_temp = random.choice(dic_snps_PPI_HIU_positives[snps])
+                train_gene_PPI_p1.append(dic_snps_emb[snps_temp])
+                train_gene_PPI_p1_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                snps_temp = random.choice(dic_snps_PPI_HIU_negatives[snps])
+                train_gene_PPI_p2.append(dic_snps_emb[snps_temp])
+                train_gene_PPI_p2_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                train_gene_PPI_p1_weight.append(weight_ppi_hiu)
+            else:
+                train_gene_PPI_p1.append(dic_snps_emb[snps])
+                train_gene_PPI_p1_gene.append(dic_gene_emb[dic_snps_gene[snps]])
+                train_gene_PPI_p2.append(dic_gene_emb[gene])
+                train_gene_PPI_p2_gene.append(dic_gene_emb[gene])
+                train_gene_PPI_p1_weight.append(1.0)
+
+            traindata_Y.append(0.0)
+            traindata_names.append(snp)
+            snps_unlabel_i = snps_with_embedding_gene[random.randint(0, len(snps_with_embedding_gene) - 1)]
+            gene_unlabel_i = dic_snps_gene[snps_unlabel_i]
+            unlabel_gene.append(dic_gene_emb[gene_unlabel_i])
+            unlabel_snps.append(dic_snps_emb[snps_unlabel_i])
+            unlabel_disease.append(dic_cui_emb[cuis_all[random.randint(0, len(cuis_all) - 1)]])
+
+    ################negative sampling based on diseases#############
+    for cui in dic_cui_snps:
+        snps_labeled = dic_cui_snps[cui]
+        snps_unlabeled = set(snps_train) - set(snps_labeled)
+        snps_benign_all = set(list(dic_snps_benign.keys()))
+        snps_unlabeled = snps_benign_all  # snps_unlabeled.union(snps_benign_all)
+
+        if cui in CUI_train:
+            num_negative = 0
+            for snps in random.sample(snps_benign_all, negative_snps):
+                if dic_snps_gene[snps] in dic_gene_emb:
+                    num_negative = num_negative + 1
+                    traindata_cuis.append(dic_cui_emb[cui])
+                    traindata_snps.append(dic_snps_emb[snps])
+
+                    snps_p_temp = random.choice(dic_snp_positive_snps[snps])
+                    traindata_snps_positive.append(dic_snps_emb[snps_p_temp])
+                    traindata_snps_positive_gene.append(dic_gene_emb[dic_snps_gene[snps_p_temp]])
+                    snps_N_temp = random.choice(dic_snp_negative_snps[snps])
+                    traindata_snps_negative.append(dic_snps_emb[snps_N_temp])
+                    traindata_snps_negative_gene.append(dic_gene_emb[dic_snps_gene[snps_N_temp]])
+
+                    index_random = random.randint(0, len(traindata_cuis_P) - 1)
+                    traindata_cuis_P.append(traindata_cuis_P[index_random])
+                    traindata_snps_P.append(traindata_snps_P[index_random])
+                    traindata_gene_P.append(traindata_gene_P[index_random])
+
+                    index_random = random.randint(0, len(traindata_cuis_P) - 1)
+                    traindata_cuis_P.append(traindata_cuis_P[index_random])
+                    traindata_snps_P.append(traindata_snps_P[index_random])
+                    traindata_gene_P.append(traindata_gene_P[index_random])
+
+                    gene = dic_snps_gene[snps]
+                    train_gene.append(dic_gene_emb[gene])
+                    if gene in dic_gene_weight:
+                        train_gene_weight.append(dic_gene_weight[gene])
+                    else:
+                        train_gene_weight.append(gene_weghts_median)
+
+                    if snps in dic_snps_PPI_interface_positives:
+                        snps_temp = random.choice(dic_snps_PPI_interface_positives[snps])
+                        train_gene_PPI_p1.append(dic_snps_emb[snps_temp])
+                        train_gene_PPI_p1_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                        snps_temp = random.choice(dic_snps_PPI_interface_negatives[snps])
+                        train_gene_PPI_p2.append(dic_snps_emb[snps_temp])
+                        train_gene_PPI_p2_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                        train_gene_PPI_p1_weight.append(weight_ppi_interface)
+                    elif snps in dic_snps_domain_positives:
+                        snps_temp = random.choice(dic_snps_domain_positives[snps])
+                        train_gene_PPI_p1.append(dic_snps_emb[snps_temp])
+                        train_gene_PPI_p1_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                        snps_temp = random.choice(dic_snps_domain_negatives[snps])
+                        train_gene_PPI_p2.append(dic_snps_emb[snps_temp])
+                        train_gene_PPI_p2_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                        train_gene_PPI_p1_weight.append(weight_domain)
+                    elif snps in dic_snps_PPI_HINT_HQ_positives:
+                        snps_temp = random.choice(dic_snps_PPI_HINT_HQ_positives[snps])
+                        train_gene_PPI_p1.append(dic_snps_emb[snps_temp])
+                        train_gene_PPI_p1_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                        snps_temp = random.choice(dic_snps_PPI_HINT_HQ_negatives[snps])
+                        train_gene_PPI_p2.append(dic_snps_emb[snps_temp])
+                        train_gene_PPI_p2_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                        train_gene_PPI_p1_weight.append(weight_ppi_hint_hq)
+                    elif snps in dic_snps_PPI_HINT_positives:
+                        snps_temp = random.choice(dic_snps_PPI_HINT_positives[snps])
+                        train_gene_PPI_p1.append(dic_snps_emb[snps_temp])
+                        train_gene_PPI_p1_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                        snps_temp = random.choice(dic_snps_PPI_HINT_negatives[snps])
+                        train_gene_PPI_p2.append(dic_snps_emb[snps_temp])
+                        train_gene_PPI_p2_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                        train_gene_PPI_p1_weight.append(weight_ppi_hint)
+                    elif snps in dic_snps_PPI_HIU_positives:
+                        snps_temp = random.choice(dic_snps_PPI_HIU_positives[snps])
+                        train_gene_PPI_p1.append(dic_snps_emb[snps_temp])
+                        train_gene_PPI_p1_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                        snps_temp = random.choice(dic_snps_PPI_HIU_negatives[snps])
+                        train_gene_PPI_p2.append(dic_snps_emb[snps_temp])
+                        train_gene_PPI_p2_gene.append(dic_gene_emb[dic_snps_gene[snps_temp]])
+                        train_gene_PPI_p1_weight.append(weight_ppi_hiu)
+                    else:
+                        train_gene_PPI_p1.append(dic_snps_emb[snps])
+                        train_gene_PPI_p1_gene.append(dic_gene_emb[dic_snps_gene[snps]])
+                        train_gene_PPI_p2.append(dic_gene_emb[gene])
+                        train_gene_PPI_p2_gene.append(dic_gene_emb[gene])
+                        train_gene_PPI_p1_weight.append(1.0)
+
+                    traindata_Y.append(0.0)
+                    traindata_names.append(traindata_names[0])
+                    # train_pair.append(str(dic_snps_index[snps]) + "_" + cui)
+
+                    snps_unlabel_i = snps_with_embedding_gene[random.randint(0, len(snps_with_embedding_gene) - 1)]
+                    gene_unlabel_i = dic_snps_gene[snps_unlabel_i]
+                    unlabel_gene.append(dic_gene_emb[gene_unlabel_i])
+                    unlabel_snps.append(dic_snps_emb[snps_unlabel_i])
+                    unlabel_disease.append(dic_cui_emb[cuis_all[random.randint(0, len(cuis_all) - 1)]])
+
+                    dic_snps_unlabeled[snps_unlabel_i] = 1
+                    dic_snps_unlabeled_gene[gene_unlabel_i] = 1
+
+        if cui in CUI_test:
+            snps_unlabeled = set(snps_test) - set(snps_labeled)
+            num_negative = 0
+            for snps in random.sample(snps_unlabeled, min(int(negative_snps / 2), int(0.2 * len(snps_unlabeled)))):
+                if dic_snps_gene[snps] in dic_gene_emb:
+                    num_negative = num_negative + 1
+                    testdata_cuis.append(dic_cui_emb[cui])
+                    testdata_snps.append(dic_snps_emb[snps])
+                    gene = dic_snps_gene[snps]
+                    testdata_gene.append(dic_gene_emb[gene])
+                    testdata_Y.append(0.0)
+                    testdata_names.append(snps)
+                    test_pair.append(str(snps) + "_" + cui)
+
+            for snps in random.sample(snps_benign_all, int(negative_snps / 2)):
+                if dic_snps_gene[snps] in dic_gene_label and dic_snps_gene[snps] in dic_gene_emb:
+                    num_negative = num_negative + 1
+                    gene = dic_snps_gene[snps]
+                    testdata_cuis.append(dic_cui_emb[cui])
+                    testdata_snps.append(dic_snps_emb[snps])
+                    testdata_gene.append(dic_gene_emb[gene])
+                    testdata_Y.append(0.0)
+                    testdata_names.append(snps)
+                    test_pair.append(str(snps) + "_" + cui)
 
 
-                                    # feature_snps_save_temp = np.array(feature_snps_save).reshape((snps_num_predict, latent_dim))
-                                    np.save(dirr_results + "feature_predicted_snps", np.array(feature_snps_save))
-                                    df = pd.DataFrame({})
-                                    df["snps"] = snps_all[0:snps_num_predict]
-                                    df.to_csv(dirr_results + "snps_names_predicted_snps.csv", index=False)
+    return (traindata_snps, traindata_cuis, traindata_snps_P, traindata_cuis_P, traindata_gene_P, traindata_Y, traindata_names,
+    testdata_cuis, testdata_snps, testdata_Y, testdata_names, test_pair, eval_SNPs, eval_index,
+    train_gene_PPI_p2, train_gene_PPI_p2_gene, unlabel_disease, eval_SNPs_train,
+    eval_cui_train, train_gene, train_gene_PPI_p1, train_gene_PPI_p1_gene, testdata_gene,
+    eval_gene_train, eval_gene_test, train_gene_weight,
+    traindata_snps_positive, traindata_snps_positive_gene, traindata_snps_negative, traindata_snps_negative_gene,
+    train_gene_PPI_p1_weight)
 
-        train_loss.reset_states()
-        train_AUC.reset_states()
-        VAE_loss.reset_states()
-        train_loss_CLIP.reset_states()
-        train_loss_ppi.reset_states()
 
 if __name__ == '__main__':
-    if not os.path.exists(dirr_save_model):
-        os.makedirs(dirr_save_model)
-    model = Model_interaction(latent_dim=latent_dim)
-    savename_model =  dirr_save_model+model_savename + "_model"
-    if os.path.exists(savename_model) and flag_reload > 0:
-        print("---------------------------------------------loadding saved model....................")
-        model = tf.keras.models.load_model(savename_model)
+    print("loaddding data begin...")
+    loaddata()
+    print("loaddding data end...")
 
 
-    (traindata_snps,traindata_cuis,traindata_snps_P,traindata_cuis_P,traindata_gene_P,traindata_Y,traindata_names,
-     testdata_cuis,testdata_snps,testdata_Y,testdata_names,test_pair,eval_SNPs,eval_index,
-     unlabel_snps,unlabel_gene,unlabel_disease,eval_SNPs_train,eval_cui_train,train_gene,train_gene_ppi_1, train_gene_ppi_2,test_gene,eval_gene_train,eval_gene_test,train_gene_weight,
-     traindata_snps_positive,traindata_snps_positive_gene,traindata_snps_negative,traindata_snps_negative_gene,train_gene_PPI_p1_weight)=\
-        loaddata(train_snps_ratio=train_ratio,negative_disease=negative_disease,
-                 negative_snps=negative_snps,flag_hard_mining=flag_hard_negative,
-                 snps_remove=snps_all_un_prediction,flag_debug=flag_debug,
-                 flag_negative_filter=flag_negative_filter,flag_cross_gene=flag_cross_gene,flag_cross_cui=flag_cross_cui)
 
-    start = time.process_time()
-    ds_test = tf.data.Dataset.from_tensor_slices(
-        (testdata_cuis, testdata_snps, testdata_Y, testdata_names, test_pair, test_gene)). \
-        shuffle(buffer_size=batch_size * 1).batch(batch_size).prefetch(tf.data.experimental.AUTOTUNE).cache()
 
-    print("ds_test end.....take times:  ", time.process_time() - start, " min.")
 
-    ds_train = tf.data.Dataset.from_tensor_slices((traindata_snps,traindata_cuis,traindata_Y,unlabel_snps,unlabel_gene,
-                                                   unlabel_disease,train_gene,train_gene_ppi_1, train_gene_ppi_2,train_gene_weight,
-                                                   traindata_snps_positive,traindata_snps_positive_gene,traindata_snps_negative,traindata_snps_negative_gene,train_gene_PPI_p1_weight)).\
-        shuffle(buffer_size=batch_size*30).batch(batch_size).\
-        prefetch(tf.data.experimental.AUTOTUNE).cache()
 
-    end = time.process_time()
-    print("---Elapsed time for pre-processing train and test by tensorflow", (end - start) /60.0, " min.")
-    time_preprocessing=(end - start) /60.0
-    print("model training begin....")
-    train_model(model, ds_train,ds_test,eval_SNPs,eval_index,epochs,eval_SNPs_train,eval_cui_train,eval_gene_train,eval_gene_test)
-    print("model training end....")
-    if flag_modelsave>0:
-        model.save(savename_model)
-    print("model saving end....")
-    print("dirr_results: ", dirr_results)
+
+
+
+
+
+

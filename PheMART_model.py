@@ -1,8 +1,6 @@
 #!/usr/bin/env python
 # coding: utf-8
-
 # In[1]:
-
 from sklearn.metrics import auc, precision_score, recall_score, accuracy_score, confusion_matrix, f1_score, \
     roc_auc_score, average_precision_score, precision_recall_curve
 import numpy as np
@@ -20,7 +18,6 @@ import argparse
 tf.keras.backend.set_floatx('float32')
 
 # os.environ["TF_GPU_ALLOCATOR"]="cuda_malloc_async"
-
 def parse_arguments(parser):
     """Read user arguments"""
     parser.add_argument('--flag_reload', type=int, default=0,
@@ -94,7 +91,6 @@ def parse_arguments(parser):
     args = parser.parse_args()
     return args
 
-
 PARSER = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 ARGS = parse_arguments(PARSER)
 flag_reload=ARGS.flag_reload  #False
@@ -130,7 +126,6 @@ dirr_results_main=ARGS.dirr_results_main
 filename_eval=ARGS.filename_eval
 weight_distill=ARGS.weight_distill
 margin_ppi=ARGS.margin_ppi
-
 scale_AE= 50.0   #   50.0
 weight_kl=0.0  #   0.0
 time_preprocessing=0
@@ -202,9 +197,6 @@ if "year_"in content_unlabel:
         if str(sig)[-5:-1]==year_target:
             dic_snp_year[snps]=1
 
-    print("----------------dic_snp_year: ",len(dic_snp_year),"  -year_target: ",year_target)
-
-
 dic_HPO_CUI_valid={}
 
 dic_snps_cui={}
@@ -238,8 +230,6 @@ for line in lines:
     embedding_all_gene_expression.append(vec)
 print("---------------------dic_gene_corexpression",len(dic_gene_corexpression))
 genes_all_with_coexpression=list(dic_gene_corexpression.keys())
-print("embedding_all_gene_expression.shape: ",np.array(embedding_all_gene_expression).shape)
-
 
 ##################################gene embedding######
 dic_gene_emb={}
@@ -516,9 +506,6 @@ for rowi in range(len(CUIs)):
         embedding_cui_all.append(np.concatenate((np.array(embedding[rowi]),embedding_EHR),axis=-1))
 print ("dic_cui_emb len: ",len(dic_cui_emb))
 dic_cui_emb["benign"] = np.min(np.array(embedding_cui_all),axis=0)  #np.zeros(shape=(len(embedding[0, :]),))  #   np.mean(embedding,axis=0)    #
-# dic_cui_emb["benign"] = np.min(embedding,axis=0)  #np.zeros(shape=(len(embedding[0, :]),))  #   np.mean(embedding,axis=0)    #
-# dic_cui_emb["others"]=  np.max(embedding,axis=0) #np.ones(shape=(len(embedding[0, :]),))*0.5   #np.sum(embedding,axis=0)  #
-#
 
 
 train_loss = tf.keras.metrics.Mean(name='train_loss')
@@ -686,7 +673,6 @@ def train_step(model,epoch_num, input_pro_tsr, input_dis_tsr,label,unlabel_snps,
         distance_snp_postive = tf.maximum(0, 0.2 - similarity_snp_p)
         distance_snp_negative = tf.maximum(0, similarity_snp_n - (-0.2))
         loss_snp_contrast = tf.reduce_mean(distance_snp_postive + distance_snp_negative)
-
 
 
         feature_snps = feature_snps / (tf.sqrt(tf.reduce_sum(tf.square(feature_snps), axis=-1, keepdims=True)))
@@ -874,9 +860,6 @@ def train_model(model,ds_train, ds_test, eval_SNPs,eval_index,epochs,eval_SNPs_t
                     train_step(model, epoch_num,traindata_snps, traindata_cuis,traindata_Y, unlabel_snps,unlabel_snps_gene,
                                unlabel_disease,traindata_gene,traindata_gene_ppi_1, traindata_gene_ppi_2,train_gene_weight,
                                traindata_snps_positive,traindata_snps_positive_gene,traindata_snps_negative,traindata_snps_negative_gene,train_gene_PPI_p1_weight)
-            # except:
-            #     except_number+=1
-            #     print("----------------------------------------------------------------error----------------------------------------------------------")
 
             if i_number == 0:
                 train_prediction = np.array(prediction)
@@ -885,7 +868,6 @@ def train_model(model,ds_train, ds_test, eval_SNPs,eval_index,epochs,eval_SNPs_t
                 train_prediction = np.concatenate((train_prediction, np.array(prediction)), axis=0)
                 train_label = np.concatenate((train_label, np.array(label)), axis=0)
 
-        print("----------------------------------------------------------------error----------------------------------------except_number: ",except_number,"----------------")
         AUC_overall_train = roc_auc_score(train_label, train_prediction)
         if epoch_num % epoch_show == 0 or epoch_num > epochs - 3:
             label_valid = []
@@ -926,7 +908,6 @@ def train_model(model,ds_train, ds_test, eval_SNPs,eval_index,epochs,eval_SNPs_t
             SNPs_val=[]
             prediction_val=[]
             label_val=[]
-
             for rowi in range(len(pred_valid)):
                 snps=str(pair_valid[rowi]).split("_")[0]
                 cui = str(pair_valid[rowi]).split("_")[1]
@@ -983,7 +964,6 @@ def train_model(model,ds_train, ds_test, eval_SNPs,eval_index,epochs,eval_SNPs_t
                     PRC_SNPs.append(prc)
                     PRC_SNPs_name.append(snps)
 
-
             for cui in dic_cui_prediction:
                 if np.sum(dic_cui_label[cui])>0 and not np.sum(dic_cui_label[cui])==len(dic_cui_label[cui]):
                     auc = roc_auc_score(dic_cui_label[cui], dic_cui_prediction[cui])
@@ -1022,7 +1002,6 @@ def train_model(model,ds_train, ds_test, eval_SNPs,eval_index,epochs,eval_SNPs_t
                 auc_total.append(np.mean(AUC_overall))
             else:
                 AUC_overall=0.5
-
             lr_precision, lr_recall, _ = precision_recall_curve(label_all, prediction_all)
             PRC_overall = metrics.auc(lr_recall, lr_precision)
             Prevelance_overall=1.0*np.sum(label_all)/len(label_all)
@@ -1034,8 +1013,7 @@ def train_model(model,ds_train, ds_test, eval_SNPs,eval_index,epochs,eval_SNPs_t
                if np.mean(auc_total[-8:-4])>np.mean(auc_total[-4:]):
                    epoch_num+=1
             print("---epoch: %i,  loss: %3f, VAE_loss: %3f, CLIP_loss: %3f, train_loss_ppi: %3f, train_AUC: %3f, auc_overall: %3f,AUC_SNPs: %3f, "
-                  "AUC_disease: %3f prc_gain: %3f , prc_gain_snps: %3f, prc_gain_disease: %3f "
-                  % (epoch_num, train_loss.result(),VAE_loss.result(),train_loss_CLIP.result(),train_loss_ppi.result(),
+                  "AUC_disease: %3f prc_gain: %3f , prc_gain_snps: %3f, prc_gain_disease: %3f " % (epoch_num, train_loss.result(),VAE_loss.result(),train_loss_CLIP.result(),train_loss_ppi.result(),
                      AUC_overall_train,  np.mean(AUC_overall), np.mean(AUC_SNPs),np.mean(AUC_cuis),
                      PRC_overall_gain,np.mean(PRC_gain_SNPs),np.mean(PRC_gain_cuis)))
 
@@ -1160,7 +1138,6 @@ def train_model(model,ds_train, ds_test, eval_SNPs,eval_index,epochs,eval_SNPs_t
                 df["snps"]=snpsname_save
                 df["cui"]=cuiname_save
                 df.to_csv(dirr_results+"snps_cuis_names_test.csv",index=False)
-
                 ##################################
                 print ("--------------------begin saving training features of snps-dsiease paris-------------------------------")
                 CUIs_embedding_train = []
@@ -1175,7 +1152,6 @@ def train_model(model,ds_train, ds_test, eval_SNPs,eval_index,epochs,eval_SNPs_t
                     gene_embedding_train.append(emb_gene)
                     cuiname_save.append(cui)
                     snpsname_save.append(snps)
-
                 for i in range(batch_size*1):
                     index_i=random.randint(0,len(snps_embedding_train)-1)
                     snps_embedding_train.append(snps_embedding_train[index_i])
@@ -1424,4 +1400,4 @@ if __name__ == '__main__':
     if flag_modelsave>0:
         model.save(savename_model)
     print("model saving end....")
-    print("dirr_results: ", dirr_results)
+
