@@ -10,7 +10,6 @@
 #SBATCH --mail-user=#####@hms.harvard.edu   # Email to which notifications will be sent
 #module load gcc/6.2.0
 #module load conda2/4.2.13
-#source activate tf2
 #
 #module load gcc/6.2.0 cuda/10.1
 #module load gcc/6.2.0 R/4.0.1
@@ -18,7 +17,7 @@
 #srun -n 2 --pty -t 3:00:00 -p gpu --mem=150G --gres=gpu:2 bash
 module load gcc/6.2.0 cuda/11.2
 module load conda2/4.2.13
-source activate tf25
+source activate tf2
 
 /n/cluster/bin/job_gpu_monitor.sh &
 
