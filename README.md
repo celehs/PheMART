@@ -7,13 +7,13 @@ We provide high-confidence phenotypic predictions at: https://shiny.parse-health
 
 # Requirements
 * python 3.7
-* tensorflow==2.3.0
+* tensorflow==2.5.2
 * numpy >= 1.19
 * pandas >= 1.3
 * scikit-learn >= 1.0.2
 
 # Usage
 ```sh
-  1. first install the environment:  setup.sh
+  1. first install the environment:  PheMART_setup.sh
   2. PheMART training and evaluation: PheMART_submit.sh
 ```
