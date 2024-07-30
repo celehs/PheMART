@@ -1,4 +1,19 @@
 # PheMART
-This repository includes the source codes and data of the paper: **Phenotypic Prediction of Missense Variants via Deep Contrastive Learning**      
+This repository hosts the official implementation of PheMART, a method that can predict the phenotypic effects of missense variants via deep contrastive learning.        
 All the source data will be shared on: https://doi.org/10.6084/m9.figshare.26036227   
 We provide high-confidence phenotypic predictions at: https://shiny.parse-health.org/PheMART/
+
+
+
+# Requirements
+* python 3.7
+* tensorflow==2.3.0
+* numpy >= 1.19
+* pandas >= 1.3
+* scikit-learn >= 1.0.2
+
+# Usage
+```sh
+  1. first install the environment:  setup.sh
+  2. PheMART training and evaluation: PheMART_submit.sh
+```
