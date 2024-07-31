@@ -4,31 +4,30 @@ import pandas as pd
 import random
 import time
 from sklearn.metrics.pairwise import cosine_similarity
-dirr = "/n/data1/hsph/biostat/celehs/lab/junwen/SNPs_codes/datasets/"
-label_file = "Clivar_snps_disease_Pathogenic_Likely_4_11_0410_trait_with_ALL_no_thers_1024.csv"    #the file with all the labeled snps
-file_CUI_covered = "CUIs_all_covered_CODER_0410_4749_noOTHERS.csv" #the file with all the CUIs
+dirr="data/"
+label_file = "Clivar_snps_disease_Pathogenic_Likely_4_11_subset.csv"    #the file with all the labeled snps
+file_CUI_covered = "CUIs_all_covered_CODER_0410.csv" #the file with all the CUIs
 file_label_as_pathogenic = "Clivar_snps_disease_PathogenicALL_Likely_4_11_0410.csv" 
 file_PPI_labels = "PrimeKG.csv" #the file with all the PPIs
 file_pathway = "PrimeKG.csv" #the file with all the pathways
 file_coexpression = "gene_coexpression_gene2vec_dim_200_iter_9.txt" #the file with all the coexpression
 disease_file_embedding_EHR = "Epoch_1000_L1_L2_3layer_MGB_VA_emb_embeddings_coder_clinvar_traits_cui_mapped_ALL_0410_with_all_renamed_withCUI_noOthers.csv" #the file with all the diseases's ERH embeddings
 disease_file_embedding_LLM = "embeddings_coder_clinvar_traits_cui_mapped_ALL_0410_with_all_renamed_withCUI_noOthers.csv" #the file with all the diseases's LLM embeddings
-snps_label_file = "labeled_230201_clinvar.csv"
-snps_label_file_embedding = "labeled_230201_clinvar_embedding.npy"
-snps_label_file_miss = "snps_miss_without_snp_embedding_filter.csv"
-snps_label_file_embedding_miss = "snps_miss_without_snp_embedding_filter_embedding_seq.npy"
+snps_label_file = "ClinVar_binary_label_0201.csv"
+snps_label_file_embedding = "ClinVar_binary_label_0201_embedding.npy"
+snps_label_file_additional = "snps_miss_without_snp_embedding_filter.csv"
+snps_label_file_additional_embedding = "ClinVar_snps_additional_embedding.npy"
 snps_unlabel_file = "unlabeled_230201_clinvar.csv"
 snps_unlabel_file_embedding = "unlabeled_230201_clinvar_embedding.npy"
 file_emb_wild = "wildtype_embeddings.csv"
-file_emb_wild_unipro = "uniprotid_gene_seq_embed.csv"
+file_wildtype_embedding_unipro = "uniprotid_gene_seq_embed.csv"
 file_map_snps_wild_l = "clinvar_missense.csv"
-file_map_snps_wild_l_0411 = "clinvar_missense_labeled_4_11.csv"
+file_label_Clinvar_part = "Clinvar_missense_labeled_0410.csv"
 file_map_snps_wild_u = "clinvar_missense_unlabeled.csv"
 file_benign = "Clivar_snps_disease_benign_Likely_4_11_0410.csv"
 file_gene_save_mapped = "Mapping_snps_genes.csv"
 file_gene_save_all = "All_genes.csv"
 file_hpo_embedding = "UDN_HPO_term_ALL_with_name_embedding_coder.csv"
-file_gene_negative = "neg_seq_100.csv"
 PPI_number_threshold = 10
 test_number = 10000000
 ###########Gene negativer protein embedding #############################snps embedding ##################
@@ -87,7 +86,7 @@ for snp, gene in zip(SNPs, genes):
                 dic_snps_gene[str(snp).strip()] = split
                 dic_gene_snps.setdefault(split, []).append(snp)
 
-df = pd.read_csv(dirr + file_map_snps_wild_l_0411)
+df = pd.read_csv(dirr + file_label_Clinvar_part)
 SNPs = list(df["Name"])
 genes = list(df["Gene(s)"])
 for snp, gene in zip(SNPs, genes):
@@ -165,9 +164,9 @@ for rowi in range(len(SNPs)):
             dic_snps_no_gene_all_unlabel[str(SNPs[rowi])] = 1
 
 ##########missed varaints
-embedding = np.load(dirr + snps_label_file_embedding_miss)
+embedding = np.load(dirr + snps_label_file_additional_embedding)
 embedding = np.array(embedding)
-df = pd.read_csv(dirr + snps_label_file_miss)
+df = pd.read_csv(dirr + snps_label_file_additional)
 SNPs = list(df["snp"])
 dic_snps_no_gene_all_miss = {}
 
