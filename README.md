@@ -1,7 +1,7 @@
 # PheMART
 This repository hosts the official implementation of PheMART, a method that predicts the phenotypic effects of missense variants (MV) via deep contrastive learning.        
 All the source data will be published on: https://doi.org/10.6084/m9.figshare.26036227 and https://doi.org/10.5281/zenodo.13138603.   
-We provide visualization of high-confidence phenotypic predictions at: https://shiny.parse-health.org/PheMART/. The visualizations are, both by phenotypes, in which we visualize all MVs predicted to be implicated in the phenotypes, and by genes in which we provide the density of pathogenic MVs at different mutation positions for varied phenotypes.    
+We offer visualizations of high-confidence phenotypic predictions at: https://shiny.parse-health.org/PheMART/. These visualizations are categorized both by phenotypes, showcasing all MVs predicted to be implicated in each phenotype, and by genes, displaying the density of pathogenic MVs at different mutation positions across various phenotypes.   
 
 
 
