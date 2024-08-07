@@ -14,6 +14,6 @@ We offer visualizations of high-confidence phenotypic predictions at: https://sh
 
 # Usage
 ```sh
-  1. first install the environment:  PheMART_setup.sh
-  2. PheMART training and evaluation: PheMART_submit.sh
+  1. first install the environment:  setup.sh
+  2. PheMART training and evaluation: submit.sh
 ```
