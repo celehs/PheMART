@@ -11,7 +11,7 @@ import logging, os
 from tensorflow.keras import layers, models
 import tensorflow as tf
 from sklearn import metrics
-from PheMART_utilization import loaddata
+from utilization import loaddata
 import scipy.stats as ss
 import time
 import argparse
