@@ -21,7 +21,7 @@ source activate tf2
 
 /n/cluster/bin/job_gpu_monitor.sh &
 
-python3 PheMART_model.py --flag_reload 0 \
+python3 model.py --flag_reload 0 \
                     --flag_debug 1 \
                     --flag_modelsave 0 \
                     --flag_negative_filter 1 \
