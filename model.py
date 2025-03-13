@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 # coding: utf-8
-# In[1]:
 from sklearn.metrics import auc, precision_score, recall_score, accuracy_score, confusion_matrix, f1_score, \
     roc_auc_score, average_precision_score, precision_recall_curve
 import numpy as np
@@ -17,8 +16,43 @@ import time
 import argparse
 tf.keras.backend.set_floatx('float32')
 # os.environ["TF_GPU_ALLOCATOR"]="cuda_malloc_async"
+
+
+
+
+
+
+
 def parse_arguments(parser):
     """Read user arguments"""
+    parser.add_argument('--main_dirr', type=str, default="data/",
+                        help='main data directory')
+    parser.add_argument('--file_CUIs_target', type=str, default="CUIs_all_covered_CODER_4179.csv",
+                        help='file including target CUIs')
+    parser.add_argument('--file_annotations', type=str, default="Clivar_snps_disease_Pathogenic_Likely_4_11_subset.csv",
+                        help='0-1 to denote if reload the model')
+    parser.add_argument('--file_snps_labeled', type=str, default="ClinVar_binary_label_0201.csv",
+                        help='file containing list of labeled snps')
+    parser.add_argument('--file_snps_labeled_embedding', type=str, default="ClinVar_binary_label_0201_embedding.npy",
+                        help='filescontaining embeddings of labeled snps')
+    parser.add_argument('--file_snps_unlabeled', type=str, default="unlabeled_230201_clinvar.csv",
+                        help='file containing list of unlabeled snps')
+    parser.add_argument('--file_snps_unlabeled_embedding', type=str, default="unlabeled_230201_clinvar_embedding.npy",
+                        help='file containing embeddings of unlabeled snps')
+    parser.add_argument('--file_wildtype_embedding', type=str, default="wildtype_embeddings.csv",
+                        help='file contaiing wildtype embeddings')
+    parser.add_argument('--file_disease_embedding_LLM', type=str, default="Phenotype_embedding_CODER.csv",
+                        help='file containing disease embeddings from LLM')
+    parser.add_argument('--file_disease_embedding_EHR', type=str, default="Phenotype_embedding_EHRs.csv",
+                        help='file containing disease embeddings from EHR')
+    parser.add_argument('--file_snps_gene_map', type=str, default="Mapping_snps_genes.csv",
+                        help='file containing mapping of snps to genes')
+    parser.add_argument('--file_snp_prediction', type=str, default="snps_prediction.csv",
+                        help='files containing list of snps for prediction')
+    parser.add_argument('--file_snp_prediction_embedding', type=str, default="snps_prediction_embedding.npy",
+                        help='files containing embeddings of snps for prediction')
+    parser.add_argument('--file_snp_prediction_gene_embedding', type=str, default="snps_prediction_embedding_gene.npy",
+                        help='files containing embeddings of genes of snps for prediction')
     parser.add_argument('--flag_reload', type=int, default=0,
                         help='0-1 to denote if reload the model')
     parser.add_argument('--flag_modelsave', type=int, default=0,
@@ -77,7 +111,7 @@ def parse_arguments(parser):
                         help='what unlabel SNPs to predict')
     parser.add_argument('--flag_save_unlabel_predict', type=int, default=1,
                         help='if predict and save unlabeled snps predictions')
-    parser.add_argument('--savename_unlabel_predict', type=str, default="snps_prediction_unlabeled_all.csv",
+    parser.add_argument('--savename_to_predict', type=str, default="snps_prediction_unlabeled_all.csv",
                         help='filename to save unlabeled snps predictions')
     parser.add_argument('--dirr_results_main', type=str, default="results/",
                         help='Directory of to save results ')
@@ -90,43 +124,63 @@ def parse_arguments(parser):
     args = parser.parse_args()
     return args
 
+
 PARSER = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 ARGS = parse_arguments(PARSER)
 flag_reload=ARGS.flag_reload  #False
 flag_modelsave=ARGS.flag_modelsave  #False
-epochs=ARGS.epochs   #   55
-latent_dim=ARGS.latent_dim   # 72
-batch_size=ARGS.batch_size   #  512
-learning_rate=ARGS.learning_rate   #  0.0006
-weight_cosine=ARGS.weight_cosine   #  1.0
-weight_vae= ARGS.weight_vae   #  0.3
-weight_unlabel_snps=ARGS.weight_unlabel_snps   #   0.2
-weight_CLIP=ARGS.weight_CLIP   #  0.5
-train_ratio=ARGS.train_ratio   #   0.9
+epochs=ARGS.epochs
+latent_dim=ARGS.latent_dim
+batch_size=ARGS.batch_size
+learning_rate=ARGS.learning_rate
+weight_cosine=ARGS.weight_cosine
+weight_vae= ARGS.weight_vae
+weight_unlabel_snps=ARGS.weight_unlabel_snps
+weight_CLIP=ARGS.weight_CLIP
+train_ratio=ARGS.train_ratio
 content_unlabel=ARGS.content_unlabel
 flag_negative_filter=ARGS.flag_negative_filter
 flag_cross_gene=ARGS.flag_cross_gene
 flag_cross_cui=ARGS.flag_cross_cui
-negative_disease=ARGS.negative_disease   #   100
-negative_snps=ARGS.negative_snps   #  100
-margin_same=ARGS.margin_same   #  0.8
-margin_differ=ARGS.margin_differ   #   -0.2
-weight_CLIP_snps=ARGS.weight_CLIP_snps   #     0.25
-weight_CLIP_cui= ARGS.weight_CLIP_cui   #   0.75
-tau_softmax=ARGS.tau_softmax   #   0.1
-flag_hard_negative=ARGS.flag_hard_negative   #  1
+negative_disease=ARGS.negative_disease
+negative_snps=ARGS.negative_snps
+margin_same=ARGS.margin_same
+margin_differ=ARGS.margin_differ
+weight_CLIP_snps=ARGS.weight_CLIP_snps
+weight_CLIP_cui= ARGS.weight_CLIP_cui
+tau_softmax=ARGS.tau_softmax
+flag_hard_negative=ARGS.flag_hard_negative
 flag_debug=ARGS.flag_debug
-model_savename=ARGS.model_savename   # "Interaction_CODER_semi_align"
-flag_save_unlabel_emb=ARGS.flag_save_unlabel_emb   # "Interaction_CODER_semi_align"
-flag_save_unlabel_predict=ARGS.flag_save_unlabel_predict   # "Interaction_CODER_semi_align"
-savename_unlabel_predict=ARGS.savename_unlabel_predict   # "Interaction_CODER_semi_align"
-dirr_save_model= ARGS.dirr_save_model #       "Model_save/"
+model_savename=ARGS.model_savename
+flag_save_unlabel_emb=ARGS.flag_save_unlabel_emb
+flag_save_unlabel_predict=ARGS.flag_save_unlabel_predict
+savename_to_predict=ARGS.savename_to_predict
+dirr_save_model= ARGS.dirr_save_model
 dirr_results_main=ARGS.dirr_results_main
 filename_eval=ARGS.filename_eval
 weight_distill=ARGS.weight_distill
 margin_ppi=ARGS.margin_ppi
-scale_AE= 50.0   #   50.0
-weight_kl=0.0  #   0.0
+
+dirr=ARGS.main_dirr
+file_CUIs_target=ARGS.file_CUIs_target
+file_annotations=ARGS.file_annotations
+file_snps_labeled=ARGS.file_snps_labeled
+file_snps_labeled_embedding=ARGS.file_snps_labeled_embedding
+file_snps_unlabeled=ARGS.file_snps_unlabeled
+file_snps_unlabeled_embedding=ARGS.file_snps_unlabeled_embedding
+file_wildtype_embedding=ARGS.file_wildtype_embedding
+file_disease_embedding_LLM=ARGS.file_disease_embedding_LLM
+file_disease_embedding_EHR=ARGS.file_disease_embedding_EHR
+file_snps_gene_map=ARGS.file_snps_gene_map
+file_snp_prediction=ARGS.file_snp_prediction
+file_snp_prediction_embedding=ARGS.file_snp_prediction_embedding
+file_snp_prediction_genes=ARGS.file_snp_prediction_genes
+file_snp_prediction_gene_embedding=ARGS.file_snp_prediction_gene_embedding
+
+
+
+scale_AE= 50.0
+weight_kl=0.0
 time_preprocessing=0
 epoch_show = 3
 epoch_MRR=500
@@ -146,42 +200,9 @@ dirr_results_prediction=dirr_results+"predictions_SNPs/"
 if not os.path.exists(dirr_results_prediction):
     os.mkdir(dirr_results_prediction)
 
-dirr="data/"
-file_CUIs_target="CUIs_all_covered_CODER_0410.csv"
-label_file="Clivar_snps_disease_Pathogenic_Likely_4_11_subset.csv"
-file_label_Clinvar_part="Clinvar_missense_labeled_0410.csv"
-snps_label_file="ClinVar_binary_label_0201.csv"  #ClinVar_binary_label_0201
-snps_label_file_embedding="ClinVar_binary_label_0201_embedding.npy"
-snps_label_file_additional="ClinVar_snps_additional.csv"  #ClinVar_snps_additional  snps_miss_without_snp_embedding_filter
-snps_label_file_additional_embedding="ClinVar_snps_additional_embedding.npy"
-file_wildtype_embedding_unipro="uniprotid_gene_seq_embed.csv"
 
-disease_file_embedding="embeddings_coder_clinvar_traits_cui_mapped_ALL_0410_with_all_renamed_withCUI_noOthers.csv" # node_disease_CUI_mapped_CUI_embedding.npy
-disease_file_embedding_EHR="Epoch_1000_L1_L2_3layer_MGB_VA_emb_embeddings_coder_clinvar_traits_cui_mapped_ALL_0410_with_all_renamed_withCUI_noOthers.csv"
-# node_disease_CUI_mapped_CUI_embedding.csv node_disease_CUI_mapped_sapbert.csv
-file_emb_wild="wildtype_embeddings.csv"
-file_snps_gene_map="Mapping_snps_genes.csv"
-snps_unlabel_file="unlabeled_230201_clinvar.csv"
-snps_unlabel_file_embedding="unlabeled_230201_clinvar_embedding.npy"
-clinvar_missense="clinvar_missense_labeled_4_11.csv"
-file_pathogenic_no_traits="Clinar_missense_pathogenic_no_traits.csv"
-genes_omim=set(list(pd.read_csv(dirr+"omim_clinvar_diff.csv")["gene"]))
-file_snps_gwas="GWAS_missense_label_HGv_no_overlap.csv"
-snps_gwas=list(pd.read_csv(dirr+file_snps_gwas)["HGV"])
-print ("snps_gwas:  len: ",len(snps_gwas))
-genes_OMIM=list(pd.read_csv(dirr+"omim_cui_mapping_coderpp_refine_sorted_subset.csv")["gene"])
-print("-----------------------genes_OMIM len:  ",len(set(genes_OMIM)))
-genes_OMIM_noClinVar=list(pd.read_csv(dirr+"omim_cui_mapping_coderpp_refine_sorted_qiao_no_clinvar.csv")["gene"])
 
-df = pd.read_csv(dirr+file_label_Clinvar_part)
-dic_snp_year={}
-if "year_"in content_unlabel:
-    year_target=str(content_unlabel).split("_")[1]
-    for  snps,sig in zip(df["Name"],df["Clinical significance (Last reviewed)"]):
-        snps=str(snps).strip()
-        sig=str(sig).strip()
-        if str(sig)[-5:-1]==year_target:
-            dic_snp_year[snps]=1
+
 dic_HPO_CUI_valid={}
 dic_snps_cui={}
 dic_cui_snps={}
@@ -194,26 +215,9 @@ dic_index_snps={}
 dic_snps_gene={}
 dic_snpsindex_gene={}
 
-df=pd.read_csv(dirr+clinvar_missense)
-SNPs_clinvar_missense=list(df["Name"])
-SNPs_clinvar_missense=list({}.fromkeys(SNPs_clinvar_missense).keys())
-print ("--------------SNPs_clinvar_missense len: ", len(SNPs_clinvar_missense))
-df=pd.read_csv(dirr+file_pathogenic_no_traits)
-Clinar_missense_pathogenic_no_traits=set(list(df["snp"]))
-
 ##################################gene embedding######
 dic_gene_emb={}
-df=pd.read_csv(dirr+file_wildtype_embedding_unipro)
-genes=list(df["gene"])
-features_all=np.array(df[df.columns[2:]])
-print ("genes len: ",len(genes))
-print ("features_all shape: ",features_all.shape)
-gene_embedding_all=[]
-for rowi in range(len(genes)):
-    gene = str(genes[rowi]).strip()
-    dic_gene_emb[gene] = features_all[rowi, :]
-
-df=pd.read_csv(dirr+file_emb_wild)
+df=pd.read_csv(dirr+file_wildtype_embedding)
 genes=list(df["gene"])
 features_all=np.array(df[df.columns[1:]])
 for rowi in range(len(genes)):
@@ -230,7 +234,7 @@ print ("dic_snps_gene len: ",len(dic_snps_gene))
 
 ##########################dic snps gene
 dic_gene_labeled={}
-df = pd.read_csv(dirr+label_file)
+df = pd.read_csv(dirr+file_annotations)
 snps_labeled_all=list({}.fromkeys(list(df["snps"])).keys())
 for index, snps in zip(df["snps_index"],df["snps"]):
     snps=str(snps).strip()
@@ -239,18 +243,13 @@ for index, snps in zip(df["snps_index"],df["snps"]):
         dic_gene_labeled[gene] = 1
         dic_snps_index[str(snps).strip()] = int(index)
         dic_index_snps[int(index)]=str(snps).strip()
-print("snps_labeled_all labeled with diseases: ",len(snps_labeled_all))
-print("dic_gene_labeled len------all labeled genes : ",len(dic_gene_labeled),"-----------------")
 
 CUIs_all_covered=list(pd.read_csv(dirr+file_CUIs_target)["CUIs"])
-
-
 ###########snps embedding #############################snps embedding ##################
-embedding=np.load(dirr+snps_label_file_embedding)
+embedding=np.load(dirr+file_snps_labeled_embedding)
 embedding=np.array(embedding)
-print ("SNPs embedding shape labeled: ",embedding.shape)
-df = pd.read_csv(dirr+snps_label_file)
-SNPs=list(df["Name"])
+df = pd.read_csv(dirr+file_snps_labeled)
+SNPs=list(df[df.columns[0]])
 print (" labeled SNPs: ",len(SNPs))
 dic_snpsname_emb_binary={}
 dic_snpsname_emb_all={}
@@ -269,135 +268,27 @@ for rowi in range(len(SNPs)):
             dic_snpsname_emb[str(SNPs[rowi]).strip()] = np.array(embedding[rowi, :])
 
 ######unlabeled
-embedding=np.load(dirr+snps_unlabel_file_embedding)
+embedding=np.load(dirr+file_snps_unlabeled_embedding)
 embedding=np.array(embedding)
-print ("SNPs embedding shape unlabeled: ",embedding.shape)
-df = pd.read_csv(dirr+snps_unlabel_file)
-SNPs=list(df["Name"])
+df = pd.read_csv(dirr+file_snps_unlabeled)
+SNPs=list(df[df.columns[0]])
 print (" unlabeled SNPs: ",len(SNPs))
 for rowi in range(len(SNPs)):
     snps_i = str(SNPs[rowi]).strip()
     if str(SNPs[rowi]).strip() in dic_snps_gene and dic_snps_gene[str(SNPs[rowi]).strip()] in dic_gene_emb:
         gene = dic_snps_gene[snps_i]
-        if gene in dic_gene_labeled : #and gene in genes_omim:
+        if gene in dic_gene_labeled :
             dic_snpsname_emb_sameGENE[snps_i] = 1
-
         dic_snpsname_emb_un[str(SNPs[rowi]).strip()] = np.array(embedding[rowi, :])
         dic_snpsname_emb_all[str(SNPs[rowi]).strip()] = np.array(embedding[rowi, :])
-            #dic_snpsname_emb[str(SNPs[rowi]).strip()] = np.array(embedding[rowi, :])
-
-embedding=np.load(dirr+snps_label_file_additional_embedding)
-embedding=np.array(embedding)
-df = pd.read_csv(dirr+snps_label_file_additional)
-SNPs=list(df["snp"])
-for rowi in range(len(SNPs)):
-    snps_i = str(SNPs[rowi]).strip()
-    dic_snpsname_emb_all[str(SNPs[rowi])] = np.array(embedding[rowi, :])
-    if str(SNPs[rowi]) in dic_snps_gene and dic_snps_gene[str(SNPs[rowi]).strip()] in dic_gene_emb:
-        gene = dic_snps_gene[snps_i]
-        if gene in dic_gene_labeled : #and gene in genes_omim:
-            dic_snpsname_emb_sameGENE[snps_i] = 1
-
-dic_snps_OMIM={}
-for snp in dic_snpsname_emb_sameGENE:
-    if dic_snps_gene[snp] in genes_OMIM:
-        dic_snps_OMIM[snp]=1
-dic_snps_OMIM_noClinVar={}
-for snp in dic_snpsname_emb_sameGENE:
-    if dic_snps_gene[snp] in genes_OMIM:
-        dic_snps_OMIM_noClinVar[snp]=1
-
-print("--------------dic_snps_OMIM: ",len(dic_snps_OMIM))
-##################predicting GWAS as unlabeled#######################
 snps_all_un_prediction=set(list(dic_snpsname_emb_sameGENE.keys()))
 
-snps_all_un_prediction=list(snps_all_un_prediction)
-random.shuffle(snps_all_un_prediction)
-snps_all_un_prediction=set(snps_all_un_prediction)
-print ("------snps_all_un_prediction: all SNPs in the labeled genes and omim to be predicted :  len: ",len(snps_all_un_prediction),"-----------")
-if content_unlabel == "ClinVar_all":
-    if flag_save_unlabel_predict > 0:
-        if not os.path.exists(dirr + model_savename+"_ClinVar_snps_to_predict_all_joint.csv") :
-            df = pd.DataFrame({})
-            df["snps"] = list(snps_all_un_prediction)
-            label_all = [1] * 50000
-            label0 = [0] * (abs(len(snps_all_un_prediction) - 50000))
-            label_all.extend(label0)
-
-            df["flag"] = label_all[0:len(snps_all_un_prediction)]
-            df.to_csv(dirr + model_savename+"_ClinVar_snps_to_predict_all_joint.csv", index=False)
-            snps_all_un_prediction = list(snps_all_un_prediction)[0:50000]
-            print("-------------ClinVar_predict_all to be predicted : ",len(snps_all_un_prediction), " begining from 0")
-        else:
-            df = pd.read_csv(dirr + model_savename+"_ClinVar_snps_to_predict_all_joint.csv")
-            snps_all_to_predict = list(df["snps"])
-            flags = list(df["flag"])
-            if 0 in flags:
-                index_begin = flags.index(0)
-                snps_all_un_prediction = snps_all_to_predict[index_begin:index_begin + 50000]
-
-                for j in range(50000):
-                    if index_begin + j < len(flags):
-                        flags[index_begin + j] = 1
-                df["flag"] = flags
-                df.to_csv(dirr +model_savename+"_ClinVar_snps_to_predict_all_joint.csv", index=False)
-                print("-------------ClinVar_snps_to_predict_all  to be predicted : ",len(snps_all_to_predict), " begining from : ", index_begin)
-            else:
-                index_begin=random.randint(0,len(snps_all_to_predict)-50000)
-                snps_all_un_prediction = snps_all_to_predict[index_begin:index_begin + 50000]
-elif "year_" in content_unlabel:
-    snps_year = set(list(dic_snp_year.keys()))  # -set(snps_labeled_all)
-    snps_all_un_prediction = snps_all_un_prediction.intersection(set(snps_year))
-elif "OMIM" in content_unlabel:
-    if "OMIM_noClinVar" in content_unlabel:
-        snps_OMIM = set(list(dic_snps_OMIM_noClinVar.keys()))  # -set(snps_labeled_all)
-        snps_all_un_prediction = snps_all_un_prediction.intersection(set(snps_OMIM))
-        if flag_save_unlabel_predict>0:
-            if not os.path.exists(dirr+model_savename+"OMIM_noClinVar_snps_to_predict_joint.csv"):
-                df = pd.DataFrame({})
-                df["snps"]=list(snps_all_un_prediction)
-                label_all=[1]*50000
-                label0=[0]*(abs(len(snps_all_un_prediction)-50000))
-                label_all.extend(label0)
-
-                df["flag"]=label_all[0:len(snps_all_un_prediction)]
-                df.to_csv(dirr+model_savename+"OMIM_noClinVar_snps_to_predict_joint.csv",index=False)
-                snps_all_un_prediction=list(snps_all_un_prediction)[0:50000]
-                print("-------------snps_all_un_prediction of OMIM and noClinVar to be predicted : ",len(snps_all_un_prediction)," begining from 0")
-            else:
-                df=pd.read_csv(dirr+model_savename+"OMIM_noClinVar_snps_to_predict_joint.csv")
-                snps_all_to_predict=list(df["snps"])
-                flags = list(df["flag"])
-                if 0 in flags:
-                    index_begin=flags.index(0)
-                    snps_all_un_prediction=snps_all_to_predict[index_begin:index_begin+50000]
-
-                    for j in range(50000):
-                        if index_begin+j<len(flags):
-                            flags[index_begin+j]=1
-                    df["flag"]=flags
-                    df.to_csv(dirr + model_savename+"OMIM_noClinVar_snps_to_predict_joint.csv", index=False)
-                    print("-------------snps_all_un_prediction of OMIM and noClinVar to be predicted : ", len(snps_all_to_predict), " begining from : ",index_begin)
-                else:
-                    index_begin = random.randint(0, len(snps_all_to_predict) - 50000)
-                    snps_all_un_prediction = snps_all_to_predict[index_begin:index_begin + 50000]
-
-    else:
-        snps_OMIM = set(list(dic_snps_OMIM.keys()))  # -set(snps_labeled_all)
-        snps_all_un_prediction = snps_all_un_prediction.intersection(set(snps_OMIM))
-        print("-------------snps_all_un_prediction of OMIM to be predicted : ", len(snps_all_un_prediction))
-
-
-print ("------snps_all_un_prediction: all SNPs in the labeled genes and omim to be predicted :  len: ",len(snps_all_un_prediction),"----------valid----")
-
-###########disease embedding ##################
-df_ehr=pd.read_csv(dirr+disease_file_embedding_EHR)
-df=pd.read_csv(dirr+disease_file_embedding)
+########### readding disease embedding ##################
+df_ehr=pd.read_csv(dirr+file_disease_embedding_EHR)
+df=pd.read_csv(dirr+file_disease_embedding_LLM)
 embedding=np.array(df[df.columns[2:]])
 embedding_cui_all=[]
-print ("CUIs embedding shape: ",embedding.shape)
-CUIs = list(pd.read_csv(dirr+disease_file_embedding)["CUIs"])
-print (" labeled CUIs: ",len(CUIs))
+CUIs = list(pd.read_csv(dirr+file_disease_embedding_LLM)[df.columns[0]])
 if not len(CUIs)==len(embedding):
     print ("-----------------------------------------error: ",  "len(CUIs) unequal to len(embedding)--------------------------","error---------------")
 for rowi in range(len(CUIs)):
@@ -407,7 +298,9 @@ for rowi in range(len(CUIs)):
         dic_cui_emb[str(CUIs[rowi])] = np.concatenate((np.array(embedding[rowi]),embedding_EHR),axis=-1)
         embedding_cui_all.append(np.concatenate((np.array(embedding[rowi]),embedding_EHR),axis=-1))
 print ("dic_cui_emb len: ",len(dic_cui_emb))
-dic_cui_emb["benign"] = np.min(np.array(embedding_cui_all),axis=0)  #np.zeros(shape=(len(embedding[0, :]),))  #   np.mean(embedding,axis=0)    #
+dic_cui_emb["benign"] = np.min(np.array(embedding_cui_all),axis=0)
+########### end readding disease embedding ##################
+
 
 train_loss = tf.keras.metrics.Mean(name='train_loss')
 train_loss_CLIP = tf.keras.metrics.Mean(name='train_loss_CLIP')
@@ -421,14 +314,12 @@ valid_AUC = tf.keras.metrics.AUC(name='valid_AUC', curve='ROC')
 valid_F1 = tf.keras.metrics.Mean(name='valid_F1')
 valid_PRC = tf.keras.metrics.AUC(name='valid_PRC', curve='PR')
 
-def Model_interaction(input_dim1=768,input_dim2=768+300,kl_weight=weight_kl,latent_dim=64,tau_KL=0.1):
+def Model_PheMART(input_dim1=768,input_dim2=768+300,kl_weight=weight_kl,latent_dim=64,tau_KL=0.1):
     input1_l = layers.Input(shape=(input_dim1,),dtype=tf.float32)
     input1_l_p = layers.Input(shape=(input_dim1,), dtype=tf.float32)
     input1_l_p_gene = layers.Input(shape=(input_dim1,), dtype=tf.float32)
     input1_l_n = layers.Input(shape=(input_dim1,), dtype=tf.float32)
     input1_l_n_gene = layers.Input(shape=(input_dim1,), dtype=tf.float32)
-
-
     input2_l = layers.Input(shape=(input_dim2,),dtype=tf.float32)
     input1_u = layers.Input(shape=(input_dim1,), dtype=tf.float32)
     input1_u_gene = layers.Input(shape=(input_dim1,), dtype=tf.float32)
@@ -444,8 +335,6 @@ def Model_interaction(input_dim1=768,input_dim2=768+300,kl_weight=weight_kl,late
 
     encoder1_layer3= layers.Dense(latent_dim, activation=tf.nn.leaky_relu, name="encoder1/fcn3", dtype='float32')
     encoder1_layer3_h1 = layers.Dense(latent_dim, activation=tf.nn.leaky_relu, name="encoder1/fcn3_h1", dtype='float32')
-
-
 
     encoder2_layer1_1 = layers.Dense(int(1.5*latent_dim), activation=tf.nn.relu, name="encoder2/fcn1",dtype='float32')
     encoder2_layer1_2 = layers.Dense(int(48), activation=tf.nn.relu, name="encoder2/fcn1_2", dtype='float32')
@@ -468,21 +357,18 @@ def Model_interaction(input_dim1=768,input_dim2=768+300,kl_weight=weight_kl,late
         feature_gene = encoder1_layer1(input_gene)
         feature_residual = encoder1_layer1_residual(feature-feature_gene)
         feature=feature+feature_residual
-        #feature=feature+encoder1_layer1_residual_h1(feature)
         mean=encoder1_layer2_mean(feature)
         fusioned=mean  #tf.concat([mean,gene_context],axis=1)
         output=decoder1_layer1(mean)  ###using the mean to recontruct
         output=decoder1_layer2(output)
-        # output = tf.cast(output, dtype=tf.float32)
+
         MSE=tf.reduce_mean(tf.square(input*scale_AE-output))
-        # output = decoder1_layer_gene(mean)
         output_gene = decoder1_layer1_gene(mean)  ###using the mean to recontruct
         output_gene = decoder1_layer2_gene(output_gene)
-        # output = tf.cast(output, dtype=tf.float32)
         MSE_gene = tf.reduce_mean(tf.square(input_gene* scale_AE - output_gene))
         MSE=MSE+MSE_gene
         return fusioned, MSE,mean
-    def AE2(input):  ####cross-entropy loss
+    def AE2(input):
         feature_1 = encoder2_layer1_1(input[:, 0:768])
         feature_2 = encoder2_layer1_2(input[:, 768:])
 
@@ -492,8 +378,7 @@ def Model_interaction(input_dim1=768,input_dim2=768+300,kl_weight=weight_kl,late
         output_1 = decoder2_layer2(output_1)
         output_2 = decoder2_layer1_2(mean)  ###using the mean to recontruct
         output_2 = decoder2_layer2_2(output_2)
-        # output = tf.cast(output, dtype=tf.float32)
-        MSE1 = tf.reduce_mean(tf.square(input[:, 0:768] * scale_AE - output_1))  # tf.keras.losses.binary_crossentropy(input, output)
+        MSE1 = tf.reduce_mean(tf.square(input[:, 0:768] * scale_AE - output_1))
         MSE2 = tf.reduce_mean(tf.square(input[:, 768:] * scale_AE - output_2))
         MSE = MSE1 + MSE2
         return mean, MSE, mean  # MSE+kl_weight*kl
@@ -512,21 +397,15 @@ def Model_interaction(input_dim1=768,input_dim2=768+300,kl_weight=weight_kl,late
             tf.sqrt(tf.reduce_sum(tf.square(input2_l), axis=-1, keepdims=True))))
     similarity_feature2 = tf.matmul(feature2_l_mean, feature2_l_mean, transpose_b=True) / ((tf.sqrt(tf.reduce_sum(tf.square(feature2_l_mean), axis=-1, keepdims=True))) * (
         tf.sqrt(tf.reduce_sum(tf.square(feature2_l_mean), axis=-1, keepdims=True))))
-    print("similarity_feature2 1: ", similarity_feature2)
+
     similarity_feature2 = tf.nn.softmax(similarity_feature2 / tau_KL, axis=1)
     similarity_input = tf.nn.softmax(similarity_input / tau_KL, axis=1)
-    print("similarity_feature2 2: ", similarity_feature2)
-    distill_L1 = tf.reduce_mean(tf.reduce_sum(tf.square(similarity_input - similarity_feature2), axis=-1))
-    # loss_distill = tf.reduce_mean(tf.reduce_sum(similarity_input * tf.math.log(similarity_input / similarity_feature2), axis=-1) +
-    #        tf.reduce_sum(similarity_feature2 * tf.math.log(similarity_feature2 / similarity_input), axis=-1))
+
     similarity_feature2 = tf.clip_by_value(similarity_feature2, 1e-10, 1.0)
     similarity_input = tf.clip_by_value(similarity_input, 1e-10, 1.0)
-    loss_distill = tf.reduce_sum(similarity_feature2 * tf.math.log(similarity_feature2 / similarity_input), axis=-1)
 
     output = (tf.reduce_sum(tf.multiply(feature1_l, feature2_l), axis=-1)) / (
             tf.sqrt(tf.reduce_sum(tf.square(feature1_l), axis=-1)) * tf.sqrt( tf.reduce_sum(tf.square(feature2_l), axis=-1)))
-    # print("------------output: ", output)
-
 
     feature1_u, loss_vae1_u, mean1_ppi_n = AE1(input1_u,input1_u_gene)
     feature2_u, loss_vae2_u, mean2_u = AE2(input2_u)
@@ -543,11 +422,9 @@ def train_step(model,epoch_num, input_pro_tsr, input_dis_tsr,label,unlabel_snps,
                input_pro_tsr_positive,input_pro_tsr_positive_gene,input_pro_tsr_negative,input_pro_tsr_negative_gene,train_gene_PPI_p1_weight):
 
     labels_multi = tf.convert_to_tensor(np.arange(label.numpy().shape[0]))
-
     train_gene_weight = 1.0 * label.numpy().shape[0] * train_gene_weight / np.sum(train_gene_weight.numpy())
     train_gene_weight = tf.convert_to_tensor(train_gene_weight)
     train_gene_weight = tf.cast(train_gene_weight, dtype=tf.float32)
-
 
     with tf.GradientTape(persistent=True) as tape:
         cce = tf.keras.losses.SparseCategoricalCrossentropy()
@@ -567,7 +444,6 @@ def train_step(model,epoch_num, input_pro_tsr, input_dis_tsr,label,unlabel_snps,
         distance_snp_negative = tf.maximum(0, similarity_snp_n - (-0.2))
         loss_snp_contrast = tf.reduce_mean(distance_snp_postive + distance_snp_negative)
 
-
         feature_snps = feature_snps / (tf.sqrt(tf.reduce_sum(tf.square(feature_snps), axis=-1, keepdims=True)))
         feature_cuis = feature_cuis / (tf.sqrt(tf.reduce_sum(tf.square(feature_cuis), axis=-1, keepdims=True)))
         feature_interaction = tf.matmul(feature_snps, feature_cuis, transpose_b=True)
@@ -577,8 +453,6 @@ def train_step(model,epoch_num, input_pro_tsr, input_dis_tsr,label,unlabel_snps,
         similarity_PPI_n = (tf.reduce_sum(tf.multiply(feature_snp_mean, feature1_l_gene_ppi_n), axis=-1)) / (
                 tf.sqrt(tf.reduce_sum(tf.square(feature_snp_mean), axis=-1)) * tf.sqrt( tf.reduce_sum(tf.square(feature1_l_gene_ppi_n), axis=-1)))
 
-        # similarity_PPI_p=tf.reduce_mean(similarity_PPI_p)
-        # similarity_PPI_n=tf.reduce_mean(similarity_PPI_n)
         loss_ppi = tf.maximum(similarity_PPI_n + margin_ppi - similarity_PPI_p, 0.0)*train_gene_PPI_p1_weight
         loss_ppi= tf.reduce_mean(loss_ppi)
 
@@ -594,12 +468,9 @@ def train_step(model,epoch_num, input_pro_tsr, input_dis_tsr,label,unlabel_snps,
             loss_cui = cce(labels_multi, tf.nn.softmax(feature_interaction * tau_softmax_adjust / tau_softmax, axis=-1))*train_gene_weight
 
         loss_CLIP_P = loss_snps * label * weight_CLIP_snps + loss_cui * label * weight_CLIP_cui
-        #loss_CLIP_N = loss_snps_N * (1 - label)  # * 0.9 + loss_cui_N * (1 - label) * 0.1
         loss_CLIP = tf.reduce_mean(loss_CLIP_P )
         loss_vae = tf.reduce_mean(loss_vae)
 
-
-        # distance_same = 1 - prediction
         distance_same = tf.maximum( 0,  margin_same- prediction)
         distance_differ = tf.maximum(0, prediction - margin_differ)
         positive_ratio = (batch_size - tf.reduce_sum(label)) / (tf.reduce_sum(label) + 1)
@@ -608,7 +479,6 @@ def train_step(model,epoch_num, input_pro_tsr, input_dis_tsr,label,unlabel_snps,
         else:
             loss = tf.reduce_mean(train_gene_weight*(1 - label) * distance_differ )
 
-        #loss = tf.reduce_mean( label * distance_same + (1 - label) * distance_differ)
         prediction= tf.nn.sigmoid(prediction)
         loss_vae=tf.reduce_mean(loss_vae)
         if margin_ppi>0:
@@ -626,8 +496,8 @@ def train_step(model,epoch_num, input_pro_tsr, input_dis_tsr,label,unlabel_snps,
     if epoch_num>0:
         gradients = tape.gradient(loss_joint, model.trainable_variables)
         optimizer.apply_gradients(grads_and_vars=zip(gradients, model.trainable_variables))
-
     prediction_mean=np.mean(prediction.numpy())
+
     if prediction_mean==prediction_mean:
         train_loss.update_state(loss)
         VAE_loss.update_state(loss_vae)
@@ -640,7 +510,6 @@ def valid_step(model, input_pro_tsr, input_dis_tsr, label,input_gene_emb):
     prediction,loss_vae,feature_snps,feature_cuis,feature_ppi_1 ,feature_ppi_2,feature_snp_mean,feature_snp_mean_p,feature_snp_mean_n= \
         model([input_pro_tsr, input_dis_tsr, input_pro_tsr, input_gene_emb,input_dis_tsr,
                input_gene_emb,input_pro_tsr,input_gene_emb,input_pro_tsr,input_pro_tsr,input_pro_tsr,input_pro_tsr])
-    # prediction = tf.nn.sigmoid(prediction)
     valid_AUC.update_state(label, tf.nn.sigmoid(prediction))
     valid_PRC.update_state(label, tf.nn.sigmoid(prediction))
 
@@ -651,7 +520,6 @@ def train_model(model,ds_train, ds_test, eval_SNPs,eval_index,epochs,eval_SNPs_t
     epoch_num = -1
     auc_total = []
     save_flag=False
-    #########################################for test######################################
     while (epoch_num < epochs):
         if epoch_num%epoch_MRR==10:
             MRR=[]
@@ -680,8 +548,6 @@ def train_model(model,ds_train, ds_test, eval_SNPs,eval_index,epochs,eval_SNPs_t
                 dic_snps_recall10[pair_snps_cui] = 0
                 dic_snps_recall50[pair_snps_cui] = 0
 
-                # dic_snps_recall10[snps_index] = 0
-                # dic_snps_recall50[snps_index] = 0
                 snps_test += 1
                 embedding_snps = dic_snpsname_emb_all[snps]
                 embedding_snps = np.tile(embedding_snps, (batch_size_test, 1))
@@ -690,7 +556,6 @@ def train_model(model,ds_train, ds_test, eval_SNPs,eval_index,epochs,eval_SNPs_t
                 embedding_gene = dic_gene_emb[dic_snps_gene[snps]]
                 embedding_gene = np.tile(embedding_gene, (batch_size_test, 1))
                 embedding_gene_input = tf.convert_to_tensor(embedding_gene, dtype=tf.float32)
-
 
                 prediction_all = []
                 feature_snps_all = []
@@ -1087,7 +952,7 @@ def train_model(model,ds_train, ds_test, eval_SNPs,eval_index,epochs,eval_SNPs_t
                     snps_embedding_train = []
                     snpsname_un=[]
                     cuis_all = list(pd.read_csv(dirr + file_CUIs_target)["CUIs"])
-                    snps_all=list(snps_all_un_prediction)#  list(set(list(dic_snpsname_emb_un.keys()))-set(snps_labeled_all))
+                    snps_all=list(snps_all_un_prediction)
                     gene_embedding_train=[]
                     print("snps_all to be predicted: ",len(snps_all))
 
@@ -1135,12 +1000,11 @@ def train_model(model,ds_train, ds_test, eval_SNPs,eval_index,epochs,eval_SNPs_t
                     df.to_csv(dirr_results + "snps_names_unlabel.csv", index=False)
 
                 if flag_save_unlabel_predict > 0:
-                    print(
-                        "-------------------- begin saving unlabeled  snps  predictions-------------------------------")
+                    print("-------------------- begin saving snps predictions-------------------------------")
+                    cuis_all = list(pd.read_csv(dirr + file_CUIs_target)["CUIs"])
+                    snps_all = list(snps_all_un_prediction)
 
                     CUIs_all_covered = list(pd.read_csv(dirr +  file_CUIs_target)["CUIs"])
-
-
                     CUIs_embedding_test = []
                     add_num= batch_size-len(CUIs_all_covered)%batch_size
                     batch_size_test = len(CUIs_all_covered)+add_num
@@ -1150,7 +1014,6 @@ def train_model(model,ds_train, ds_test, eval_SNPs,eval_index,epochs,eval_SNPs_t
                         CUIs_embedding_test.append(CUIs_embedding_test[random.randint(0,batch_size)])
                     CUIs_embedding_test = np.array(CUIs_embedding_test)
                     CUIs_embedding_test_input = tf.convert_to_tensor(CUIs_embedding_test, dtype=tf.float32)
-                    snps_all = list(snps_all_un_prediction)  #
                     snps_num_predict = 0
                     feature_snps_save = []
                     feature_disease_save=[]
@@ -1159,14 +1022,10 @@ def train_model(model,ds_train, ds_test, eval_SNPs,eval_index,epochs,eval_SNPs_t
                     batch_max = int(batch_size_test / batch_size)
                     CUI_save_all = []
                     score_save_all = []
-
                     dic_snp_score = {}
                     dic_snp_cuis = {}
-                    top_N=100
-
-
                     top_N = len(CUIs_all_covered)
-                    for snps in snps_all[0:50000]:
+                    for snps in snps_all_un_prediction:
                         if snps==snps and snps in dic_snpsname_emb_all:
                             snps_num_predict += 1
                             embedding_snps = dic_snpsname_emb_all[snps]
@@ -1201,7 +1060,6 @@ def train_model(model,ds_train, ds_test, eval_SNPs,eval_index,epochs,eval_SNPs_t
                             feature_snps_all = np.array(feature_snps_all).reshape((batch_size * batch_max, -1))
                             feature_cuis_all = np.array(feature_cuis_all).reshape((batch_size * batch_max, -1))
 
-                            #feature_disease_save = feature_cuis_all[0:len(CUIs_all_covered), :]
                             feature_snps_save.append(feature_snps_all[0])
 
                             prediction_sort, CUIs_all_covered_sort = zip(*sorted(zip(prediction_all, CUIs_all_covered), reverse=True))
@@ -1212,29 +1070,22 @@ def train_model(model,ds_train, ds_test, eval_SNPs,eval_index,epochs,eval_SNPs_t
                             dic_snp_score[snps] = prediction_sort[0:top_N]
                             dic_snp_cuis[snps] = CUIs_all_covered_sort[0:top_N]
 
-                            if True:  # content_unlabel=="ALL":
-                                if  snps_num_predict % 50000 == 0 or snps_num_predict == len(snps_all):
-                                    print("-------------snps_num_predict: ", snps_num_predict)
-                                    savename_unlabel_predict_final = str(
-                                        snps_num_predict) + "_CUI_" + savename_unlabel_predict
-                                    CUI_save_all = np.array(CUI_save_all).T
-                                    #np.save(dirr_results + savename_unlabel_predict_final, np.array(CUI_save_all[0:snps_num_predict]).T)
-                                    df = pd.DataFrame(CUI_save_all)
-                                    df.to_csv(dirr_results + savename_unlabel_predict_final, header=snps_save_all, index=False)
+                            if  snps_num_predict % 10000 == 0 or snps_num_predict == len(snps_all):
+                                CUI_save_all = np.array(CUI_save_all).T
+                                df = pd.DataFrame(CUI_save_all)
+                                df.to_csv(dirr_results + str(snps_num_predict) + "_CUI_" + savename_to_predict, header=snps_save_all, index=False)
 
-                                    savename_unlabel_predict_final = str( snps_num_predict) + "_score_" + savename_unlabel_predict
-                                    score_save_all = np.array(score_save_all).T
-                                    score_save_all = np.squeeze(score_save_all)
-                                    #np.save(dirr_results + savename_unlabel_predict_final, np.array(score_save_all[0:snps_num_predict]).T)
-                                    df = pd.DataFrame(score_save_all)
-                                    df.to_csv(dirr_results + savename_unlabel_predict_final, header=snps_save_all,index=False)
+                                score_save_all = np.array(score_save_all).T
+                                score_save_all = np.squeeze(score_save_all)
 
+                                df = pd.DataFrame(score_save_all)
+                                df.to_csv(dirr_results + str(snps_num_predict) + "_score_" + savename_to_predict, header=snps_save_all,index=False)
 
-                                    np.save(dirr_results + "feature_predicted_snps", np.array(feature_snps_save))
-                                    df = pd.DataFrame({})
-                                    df["snps"] = snps_all[0:snps_num_predict]
-                                    df.to_csv(dirr_results + "snps_names_predicted_snps.csv", index=False)
-                    print("-------------------- end saving unlabeled  snps  predictions-------------------------------")
+                                np.save(dirr_results + "feature_predicted_snps", np.array(feature_snps_save))
+                                df = pd.DataFrame({})
+                                df["snps"] = snps_all[0:snps_num_predict]
+                                df.to_csv(dirr_results + "snps_names_predicted_snps.csv", index=False)
+
         train_loss.reset_states()
         train_AUC.reset_states()
         VAE_loss.reset_states()
@@ -1244,12 +1095,12 @@ def train_model(model,ds_train, ds_test, eval_SNPs,eval_index,epochs,eval_SNPs_t
 if __name__ == '__main__':
     if not os.path.exists(dirr_save_model):
         os.makedirs(dirr_save_model)
-    model = Model_interaction(latent_dim=latent_dim)
+    model = Model_PheMART(latent_dim=latent_dim)
     savename_model =  dirr_save_model+model_savename + "_model"
     if os.path.exists(savename_model) and flag_reload > 0:
         print("---------------------------------------------loadding saved model....................")
         model = tf.keras.models.load_model(savename_model)
-    print("loadding data....................")
+    print("---loadding data begin-----")
     (traindata_snps,traindata_cuis,traindata_snps_P,traindata_cuis_P,traindata_gene_P,traindata_Y,traindata_names,
      testdata_cuis,testdata_snps,testdata_Y,testdata_names,test_pair,eval_SNPs,eval_index,
      unlabel_snps,unlabel_gene,unlabel_disease,eval_SNPs_train,eval_cui_train,train_gene,train_gene_ppi_1, train_gene_ppi_2,test_gene,eval_gene_train,eval_gene_test,train_gene_weight,
@@ -1258,7 +1109,9 @@ if __name__ == '__main__':
                  negative_snps=negative_snps,flag_hard_mining=flag_hard_negative,
                  snps_remove=snps_all_un_prediction,flag_debug=flag_debug,
                  flag_negative_filter=flag_negative_filter,flag_cross_gene=flag_cross_gene,flag_cross_cui=flag_cross_cui)
-    start = time.process_time()
+
+    print("---loadding data end -----")
+
     ds_test = tf.data.Dataset.from_tensor_slices(
         (testdata_cuis, testdata_snps, testdata_Y, testdata_names, test_pair, test_gene)). \
         shuffle(buffer_size=batch_size * 1).batch(batch_size).prefetch(tf.data.experimental.AUTOTUNE).cache()
@@ -1268,13 +1121,11 @@ if __name__ == '__main__':
                                                    traindata_snps_positive,traindata_snps_positive_gene,traindata_snps_negative,traindata_snps_negative_gene,train_gene_PPI_p1_weight)).\
         shuffle(buffer_size=batch_size*30).batch(batch_size).\
         prefetch(tf.data.experimental.AUTOTUNE).cache()
-    end = time.process_time()
-    print("---Elapsed time for pre-processing train and test by tensorflow", (end - start) /60.0, " min.")
-    time_preprocessing=(end - start) /60.0
-    print("model training begin....")
+
+    print("---Model training begin---")
     train_model(model, ds_train,ds_test,eval_SNPs,eval_index,epochs,eval_SNPs_train,eval_cui_train,eval_gene_train,eval_gene_test)
-    print("model training end....")
+    print("---Model training end---")
     if flag_modelsave>0:
         model.save(savename_model)
-    print("model saving end....")
+    print("---model saving end!")
 
