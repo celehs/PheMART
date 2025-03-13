@@ -1,0 +1,7 @@
+tensorflow==2.5.2
+pandas
+numpy
+click
+scipy
+scikit-learn
+configparser
