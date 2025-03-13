@@ -107,8 +107,8 @@ for snp, gene in zip(SNPs, genes):
             if split in dic_gene_emb:
                 dic_snps_gene[str(snp).strip()] = split
                 dic_gene_snps.setdefault(split, []).append(str(snp).strip())
-print("dic_snps_gene len: ", len(dic_snps_gene))
 
+print("dic_snps_gene len: ", len(dic_snps_gene))
 snps_save = []
 gene_save = []
 for snps in dic_snps_gene:
