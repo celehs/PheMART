@@ -66,7 +66,7 @@ pip install -r requirements.txt
 PheMART requires different input datasets depending on the use case.
 
 ### 1. Using the Pre-trained Model
-- **Required Input**: A list of missense variants in **VCF** or **CSV** format.
+- **Required Input**: A list of missense variants in **CSV** format.
 - **Example format** (CSV):
   ```
   variant_id,gene,chromosome,position,ref,alt
@@ -76,10 +76,10 @@ PheMART requires different input datasets depending on the use case.
 
 ### 2. Fine-Tuning or Training a New Model
 - **Variant Embeddings**: Precomputed embeddings for missense variants.
-- **Phenotype Embeddings**: Precomputed phenotype representation (e.g., derived from EHR or knowledge graphs).
+- **Phenotype Embeddings**: Precomputed phenotype representation. The LLM phenotype embeddings have been provided and the EHR embedding will be provided upon request.
 - **Training Labels (if available)**: Variant-pathogenicity annotations.
 
-**Note:** Some input datasets (e.g., clinical EHR embeddings) cannot be publicly shared due to privacy constraints. However, we provide scripts to preprocess user-provided data.
+**Note:** We also provide scripts to preprocess user-provided patient-level data for generating EHR embeddings..
 
 ---
 
@@ -87,7 +87,7 @@ PheMART requires different input datasets depending on the use case.
 ### Running Inference with Pre-trained Model
 To run inference using our pre-trained model:
 ```bash
-python predict.py --input variants.csv --output results.csv --pretrained_model models/phemart_pretrained.pth
+python predict.py --file_snp_prediction variants.csv  --dirr_results_main  results.csv --pretrained_model data/model_pretrained/
 ```
 
 #### Arguments
