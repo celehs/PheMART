@@ -38,7 +38,7 @@ To ensure smooth execution, we recommend the following system specifications:
 - **GPU (for training)**: NVIDIA GPU with at least 16GB VRAM (e.g., RTX 3090, A100, V100)
 - **CUDA**: 10.4+
 - **Memory**: Minimum 16GB RAM (32GB recommended for large datasets)
-- **Storage**: At least 10GB free space 
+- **Storage**: At least 10GB of free space 
 
 ---
 
@@ -79,7 +79,7 @@ PheMART requires different input datasets depending on the use case.
 - **Phenotype Embeddings**: Precomputed phenotype representation. The LLM phenotype embeddings have been provided and the EHR embedding will be provided upon request.
 - **Training Labels (if available)**: Variant-pathogenicity annotations.
 
-**Note:** We also provide scripts to preprocess user-provided patient-level data for generating EHR embeddings..
+**Note:** We also provide scripts to preprocess user-provided patient-level data for generating EHR embeddings.
 
 ---
 
@@ -87,12 +87,12 @@ PheMART requires different input datasets depending on the use case.
 ### Running Inference with Pre-trained Model
 To run inference using our pre-trained model:
 ```bash
-python predict.py --file_snp_prediction variants.csv  --dirr_results_main  results.csv --pretrained_model data/model_pretrained/
+python predict.py --file_snp_prediction variants.csv  --dirr_results_main  result/ --pretrained_model data/model_pretrained/
 ```
 
 #### Arguments
-- `--input`: Path to the input variant file (VCF/CSV).
-- `--output`: Path to save the predictions.
+- `--file_snp_prediction`: File containing the list of variants to predict (CSV).
+- `--dirr_results_main`: Path to save the predictions.
 - `--pretrained_model`: Path to the pre-trained model.
 
 ---
@@ -100,13 +100,13 @@ python predict.py --file_snp_prediction variants.csv  --dirr_results_main  resul
 ### Fine-Tuning or Training a New Model
 To fine-tune or train a model using your own dataset:
 ```bash
-bash submit.sh --train --data_path /path/to/dataset --output_dir /path/to/output
+bash submit.sh --train --file_annotations /path/to/dataset --dirr_results_main /path/to/output
 ```
 
 #### Arguments
 - `--train`: Flag to indicate training mode.
-- `--data_path`: Directory containing input variant & phenotype embeddings.
-- `--output_dir`: Path to save the trained model and logs.
+- `--file_annotations`: File containing the annotated variant-phenotype pairs.
+- `--dirr_results_main`: Path to save the trained model, result files and logs.
 
 ---
 
@@ -123,7 +123,6 @@ PheMART generates different outputs depending on the mode of operation.
   - Higher scores indicate a higher likelihood of pathogenicity.
 
 ### 2. Training Mode
-- `model_checkpoint.pth`: The saved fine-tuned model.
 - `training_logs.txt`: Training loss, accuracy, and hyperparameters.
 - `predictions_on_validation.csv`: Model performance on the validation dataset.
 
@@ -133,14 +132,14 @@ PheMART generates different outputs depending on the mode of operation.
 The `submit.sh` script automates the following computational steps:
 
 1. **Data Preprocessing**
-   - Converts VCF/CSV variant data into embeddings.
-   - Normalizes phenotype embeddings.
+   - Converts CSV variant data into embeddings.
+   - Get phenotype embeddings.
    - Splits data into training and validation sets.
 
 2. **Model Training / Fine-Tuning**
    - Loads the dataset and initializes the neural network.
    - Runs training with mini-batch gradient descent.
-   - Performs validation and saves the best-performing model.
+   - Performs validation and saves the models.
 
 3. **Prediction and Evaluation**
    - If in inference mode, loads the trained model and predicts pathogenicity scores.
