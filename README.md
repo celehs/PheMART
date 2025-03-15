@@ -123,15 +123,15 @@ PheMART generates different outputs depending on the mode of operation.
 ### 1. Inference Mode (Using Pre-trained Model)
 - `results.csv`: Contains predicted pathogenicity scores for each variant.
   ```
-  variant_id,predicted_score
-  rs123456,0.85
-  rs789012,0.15
+  variant_id, phenotype, predicted_score
+   NM_002074.5(GNB1):c.388G>A (p.Glu130Lys),C1535926, 0.85
+  NM_003036.4(SKI):c.68A>C (p.Gln23Pro),C1321551, 0.15
   ```
   - Higher scores indicate a higher likelihood of pathogenicity.
 
 ### 2. Training Mode
 - `training_logs.txt`: Training loss, accuracy, and hyperparameters.
-- `predictions_on_validation.csv`: Model performance on the validation dataset.
+- `results_validations.txt`: Model performance on the validation dataset.
 
 ---
 
@@ -149,7 +149,7 @@ The `submit.sh` script automates the following computational steps:
    - Performs validation and saves the models.
 
 3. **Prediction and Evaluation**
-   - If in inference mode, loads the trained model and predicts pathogenicity scores.
+   - If in inference mode, loads the trained model and predicts the variant's relevance to all the phenotypes investigated.
    - Saves predictions in `results.csv`.
 
 ---
