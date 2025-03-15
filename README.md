@@ -67,9 +67,9 @@ PheMART requires different input datasets depending on the use case.
 - **Required Input**: A list of missense variants in **CSV** format and a file containing the variant embeddings with ***Numpy array** format. Each row represents the embedding vector of a variant.
 - **Example format** (CSV):
   ```
-  variant_id,gene,chromosome,position,ref,alt
-  NM_002074.5(GNB1):c.230G>A (p.Gly77Asp),GeneX,1,123456,A,T
-  NM_022787.4(NMNAT1):c.205A>G (p.Met69Val),GeneY,2,789012,C,G
+  variants
+  NM_002074.5(GNB1):c.230G>A (p.Gly77Asp)
+  NM_022787.4(NMNAT1):c.205A>G (p.Met69Val)
   ```
 
 ### 2. Fine-Tuning or Training a New Model
@@ -104,13 +104,16 @@ python predict.py --file_snp_prediction variants.csv  --dirr_results_main  resul
 ### Fine-Tuning or Training a New Model
 To fine-tune or train a model using your own dataset:
 ```bash
-bash submit.sh --train --file_annotations /path/to/dataset --dirr_results_main /path/to/output
+bash submit.sh --train --file_annotations /path/to/annotations --file_snps_labeled  /path/to/list of labeled variants  --file_snps_labeled_embedding  /path/to/embeddings of labeled variants  --dirr_results_main /path/to/results  --dirr_save_model  /path/to/saved model
 ```
 
 #### Arguments
 - `--train`: Flag to indicate training mode.
 - `--file_annotations`: File containing the annotated variant-phenotype pairs.
-- `--dirr_results_main`: Path to save the trained model, result files and logs.
+- `--file_annotations`: File containing the list of annotated variants.
+- `--file_annotations`: File containing the embedding vectors of the annotated variants.
+- `--dirr_results_main`: Path to save result files.
+- `--dirr_save_model`: Path to save the trained model.
 
 ---
 
