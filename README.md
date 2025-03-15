@@ -16,8 +16,6 @@ We offer visualizations of high-confidence phenotypic predictions at: https://sh
   - [Fine-Tuning or Training a New Model](#fine-tuning-or-training-a-new-model)
 - [Expected Outputs](#expected-outputs)
 - [Computation Steps](#computation-steps)
-- [Citation](#citation)
-- [License](#license)
 
 ---
 
@@ -66,18 +64,24 @@ pip install -r requirements.txt
 PheMART requires different input datasets depending on the use case.
 
 ### 1. Using the Pre-trained Model
-- **Required Input**: A list of missense variants in **CSV** format.
+- **Required Input**: A list of missense variants in **CSV** format and a file containing the variant embeddings with ***Numpy array** format. Each row represents the embedding vector of a variant.
 - **Example format** (CSV):
   ```
   variant_id,gene,chromosome,position,ref,alt
-  rs123456,GeneX,1,123456,A,T
-  rs789012,GeneY,2,789012,C,G
+  NM_002074.5(GNB1):c.230G>A (p.Gly77Asp),GeneX,1,123456,A,T
+  NM_022787.4(NMNAT1):c.205A>G (p.Met69Val),GeneY,2,789012,C,G
   ```
 
 ### 2. Fine-Tuning or Training a New Model
 - **Variant Embeddings**: Precomputed embeddings for missense variants.
 - **Phenotype Embeddings**: Precomputed phenotype representation. The LLM phenotype embeddings have been provided and the EHR embedding will be provided upon request.
-- **Training Labels (if available)**: Variant-pathogenicity annotations.
+- **Training Labels (if available)**: Variant-phenotype annotations in **CSV** format.
+  - **Example format** (CSV):
+  ```
+  variant_id,gene,phenotype_CUI
+  NM_002074.5(GNB1):c.388G>A (p.Glu130Lys),GeneX,C3276355
+  NM_003036.4(SKI):c.68A>C (p.Gln23Pro),GeneY,C1321551
+  ```
 
 **Note:** We also provide scripts to preprocess user-provided patient-level data for generating EHR embeddings.
 
