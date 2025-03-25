@@ -34,8 +34,8 @@ To ensure smooth execution, we recommend the following system specifications:
 - **Operating System**: Ubuntu 20.04 / macOS 12+ / Windows Subsystem for Linux (WSL)
 - **Python Version**: 3.8+
 - **GPU (for training)**: NVIDIA GPU with at least 16GB VRAM (e.g., RTX 3090, A100, V100)
-- **CUDA**: 10.4+
-- **Memory**: Minimum 16GB RAM (32GB recommended for large datasets)
+- **CUDA**: 11.2+
+- **Memory**: Minimum 16GB RAM
 - **Storage**: At least 10GB of free space 
 
 ---
