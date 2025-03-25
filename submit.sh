@@ -17,12 +17,16 @@
 #srun -n 2 --pty -t 3:00:00 -p gpu --mem=150G --gres=gpu:2 bash
 module load gcc/6.2.0 cuda/11.2
 module load conda2/4.2.13
-source activate tf2
+source activate pheMART_env
 
 /n/cluster/bin/job_gpu_monitor.sh &
+   
 
 python3 model.py --flag_reload 0 \
+                    --dirr_results_main  result/
+                    --pretrained_model data/model_pretrained/
                     --flag_debug 1 \
+                    --file_snp_prediction variants.csv
                     --flag_modelsave 0 \
                     --flag_negative_filter 1 \
                     --flag_cross_gene 1 \
