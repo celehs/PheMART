@@ -91,7 +91,7 @@ PheMART requires different input datasets depending on the use case.
 ### Running Inference with Pre-trained Model
 To run inference using our pre-trained model:
 ```bash
-python model.py --file_snp_prediction variants.csv  --dirr_results_main  result/ --pretrained_model data/model_pretrained/
+python predict.py --file_snp_prediction variants.csv  --dirr_results_main  result/ --pretrained_model data/model_pretrained/
 ```
 
 #### Arguments
