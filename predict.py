@@ -18,11 +18,6 @@ tf.keras.backend.set_floatx('float32')
 # os.environ["TF_GPU_ALLOCATOR"]="cuda_malloc_async"
 
 
-
-
-
-
-
 def parse_arguments(parser):
     """Read user arguments"""
     parser.add_argument('--main_dirr', type=str, default="data/",
@@ -178,7 +173,6 @@ file_snp_prediction_genes=ARGS.file_snp_prediction_genes
 file_snp_prediction_gene_embedding=ARGS.file_snp_prediction_gene_embedding
 
 
-
 scale_AE= 50.0
 weight_kl=0.0
 time_preprocessing=0
@@ -199,8 +193,6 @@ if not os.path.exists(dirr_results):
 dirr_results_prediction=dirr_results+"predictions_SNPs/"
 if not os.path.exists(dirr_results_prediction):
     os.mkdir(dirr_results_prediction)
-
-
 
 
 dic_HPO_CUI_valid={}
@@ -401,9 +393,6 @@ def Model_PheMART(input_dim1=768,input_dim2=768+300,kl_weight=weight_kl,latent_d
     similarity_feature2 = tf.nn.softmax(similarity_feature2 / tau_KL, axis=1)
     similarity_input = tf.nn.softmax(similarity_input / tau_KL, axis=1)
 
-    similarity_feature2 = tf.clip_by_value(similarity_feature2, 1e-10, 1.0)
-    similarity_input = tf.clip_by_value(similarity_input, 1e-10, 1.0)
-
     output = (tf.reduce_sum(tf.multiply(feature1_l, feature2_l), axis=-1)) / (
             tf.sqrt(tf.reduce_sum(tf.square(feature1_l), axis=-1)) * tf.sqrt( tf.reduce_sum(tf.square(feature2_l), axis=-1)))
 
@@ -417,34 +406,541 @@ def Model_PheMART(input_dim1=768,input_dim2=768+300,kl_weight=weight_kl,latent_d
     return model
 
 
+def train_step(model,epoch_num, input_pro_tsr, input_dis_tsr,label,unlabel_snps,unlabel_snps_gene,
+               unlabel_disease,input_gene_emb,input_gene_ppi1_emb,input_gene_ppi2_emb,train_gene_weight,
+               input_pro_tsr_positive,input_pro_tsr_positive_gene,input_pro_tsr_negative,input_pro_tsr_negative_gene,train_gene_PPI_p1_weight):
+
+    labels_multi = tf.convert_to_tensor(np.arange(label.numpy().shape[0]))
+    train_gene_weight = 1.0 * label.numpy().shape[0] * train_gene_weight / np.sum(train_gene_weight.numpy())
+    train_gene_weight = tf.convert_to_tensor(train_gene_weight)
+    train_gene_weight = tf.cast(train_gene_weight, dtype=tf.float32)
+
+    with tf.GradientTape(persistent=True) as tape:
+        cce = tf.keras.losses.SparseCategoricalCrossentropy()
+        prediction,loss_vae,feature_snps,feature_cuis,feature1_l_gene_ppi_p,feature1_l_gene_ppi_n,feature_snp_mean,feature_snp_mean_p,feature_snp_mean_n=\
+            model([input_pro_tsr, input_dis_tsr, unlabel_snps,unlabel_snps_gene,unlabel_disease,input_gene_emb,input_gene_ppi1_emb,input_gene_ppi2_emb,
+                   input_pro_tsr_positive,input_pro_tsr_positive_gene,input_pro_tsr_negative,input_pro_tsr_negative_gene])
+
+        similarity_snp_p = (tf.reduce_sum(tf.multiply(feature_snp_mean, feature_snp_mean_p), axis=-1)) / (
+                    tf.sqrt(tf.reduce_sum(tf.square(feature_snp_mean), axis=-1)) * tf.sqrt( tf.reduce_sum(tf.square(feature_snp_mean_p), axis=-1)))
+
+        similarity_snp_n = (tf.reduce_sum(tf.multiply(feature_snp_mean, feature_snp_mean_n), axis=-1)) / (tf.sqrt(tf.reduce_sum(tf.square(feature_snp_mean), axis=-1)) * tf.sqrt(tf.reduce_sum(tf.square(feature_snp_mean_n), axis=-1)))
+
+        distance_snp_postive = tf.maximum(0, 0.2 - similarity_snp_p)
+        distance_snp_negative = tf.maximum(0, similarity_snp_n - (-0.2))
+        loss_snp_contrast = tf.reduce_mean(distance_snp_postive + distance_snp_negative)
+
+        feature_snps = feature_snps / (tf.sqrt(tf.reduce_sum(tf.square(feature_snps), axis=-1, keepdims=True)))
+        feature_cuis = feature_cuis / (tf.sqrt(tf.reduce_sum(tf.square(feature_cuis), axis=-1, keepdims=True)))
+        feature_interaction = tf.matmul(feature_snps, feature_cuis, transpose_b=True)
+
+        similarity_PPI_p = (tf.reduce_sum(tf.multiply(feature_snp_mean, feature1_l_gene_ppi_p), axis=-1)) / ( tf.sqrt(tf.reduce_sum(tf.square(feature_snp_mean), axis=-1)) * tf.sqrt(tf.reduce_sum(tf.square(feature1_l_gene_ppi_p), axis=-1)))
+
+        similarity_PPI_n = (tf.reduce_sum(tf.multiply(feature_snp_mean, feature1_l_gene_ppi_n), axis=-1)) / (
+                tf.sqrt(tf.reduce_sum(tf.square(feature_snp_mean), axis=-1)) * tf.sqrt( tf.reduce_sum(tf.square(feature1_l_gene_ppi_n), axis=-1)))
+
+        loss_ppi = tf.maximum(similarity_PPI_n + margin_ppi - similarity_PPI_p, 0.0)*train_gene_PPI_p1_weight
+        loss_ppi= tf.reduce_mean(loss_ppi)
+
+        if epoch_num<epochs/3:
+            tau_softmax_adjust=1.0
+        else:
+            tau_softmax_adjust=1.0
+        if tau_softmax>0.5:
+            loss_snps = cce(labels_multi, tf.nn.softmax(tf.transpose(feature_interaction /tau_softmax), axis=-1))*train_gene_weight
+            loss_cui = cce(labels_multi, tf.nn.softmax(feature_interaction  / tau_softmax, axis=-1))*train_gene_weight
+        else:
+            loss_snps = cce(labels_multi, tf.nn.softmax(tf.transpose(feature_interaction* 2.0*tau_softmax_adjust  /tau_softmax), axis=-1))*train_gene_weight
+            loss_cui = cce(labels_multi, tf.nn.softmax(feature_interaction * tau_softmax_adjust / tau_softmax, axis=-1))*train_gene_weight
+
+        loss_CLIP_P = loss_snps * label * weight_CLIP_snps + loss_cui * label * weight_CLIP_cui
+        loss_CLIP = tf.reduce_mean(loss_CLIP_P )
+        loss_vae = tf.reduce_mean(loss_vae)
+
+        distance_same = tf.maximum( 0,  margin_same- prediction)
+        distance_differ = tf.maximum(0, prediction - margin_differ)
+        positive_ratio = (batch_size - tf.reduce_sum(label)) / (tf.reduce_sum(label) + 1)
+        if weight_cosine>=5:
+            loss =  tf.reduce_mean(train_gene_weight* ((batch_size - tf.reduce_sum(label))*label * distance_same*0.99 + (1 - label) * distance_differ*tf.reduce_sum(label) )/batch_size)
+        else:
+            loss = tf.reduce_mean(train_gene_weight*(1 - label) * distance_differ )
+
+        prediction= tf.nn.sigmoid(prediction)
+        loss_vae=tf.reduce_mean(loss_vae)
+        if margin_ppi>0:
+            weight_ppi=[3.0,3.0,2.5]
+        else:
+            weight_ppi=[0.0,0.0,0.0]
+        if epoch_num < epochs / 3:
+            if epoch_num < 6:
+                loss_joint =loss_snp_contrast+weight_vae*loss_vae +loss_ppi *  weight_ppi[0]+loss*5.0
+            else:
+                loss_joint =loss_snp_contrast+weight_vae*loss_vae +loss_ppi *  weight_ppi[1]+loss_CLIP*0.1+loss*5.0
+        else:
+            loss_joint = weight_vae * loss_vae + loss_CLIP * weight_CLIP + loss_ppi *  weight_ppi[2]+loss_snp_contrast+loss*5.0
+
+    if epoch_num>0:
+        gradients = tape.gradient(loss_joint, model.trainable_variables)
+        optimizer.apply_gradients(grads_and_vars=zip(gradients, model.trainable_variables))
+    prediction_mean=np.mean(prediction.numpy())
+
+    if prediction_mean==prediction_mean:
+        train_loss.update_state(loss)
+        VAE_loss.update_state(loss_vae)
+        train_loss_CLIP.update_state(loss_CLIP)
+        train_loss_ppi.update_state(loss_ppi)
+        train_AUC.update_state(label, prediction)
+    return loss.numpy(),prediction.numpy(),label.numpy(),
+
+def valid_step(model, input_pro_tsr, input_dis_tsr, label,input_gene_emb):
+    prediction,loss_vae,feature_snps,feature_cuis,feature_ppi_1 ,feature_ppi_2,feature_snp_mean,feature_snp_mean_p,feature_snp_mean_n= \
+        model([input_pro_tsr, input_dis_tsr, input_pro_tsr, input_gene_emb,input_dis_tsr,
+               input_gene_emb,input_pro_tsr,input_gene_emb,input_pro_tsr,input_pro_tsr,input_pro_tsr,input_pro_tsr])
+    valid_AUC.update_state(label, tf.nn.sigmoid(prediction))
+    valid_PRC.update_state(label, tf.nn.sigmoid(prediction))
+    return label.numpy(), prediction.numpy()
+
 def train_model(model,ds_train, ds_test, eval_SNPs,eval_index,epochs,eval_SNPs_train,eval_cui_train,eval_gene_train,eval_gene_test):
     print("--------begin training.....")
     epoch_num = -1
     auc_total = []
     save_flag=False
-    CUIs_all_covered = list(pd.read_csv(dirr + file_CUIs_target)["CUIs"])
-    CUIs_embedding_test = []
-    add_num = batch_size - len(CUIs_all_covered) % batch_size
-    batch_size_test = len(CUIs_all_covered) + add_num
-    for cui in CUIs_all_covered:
-        CUIs_embedding_test.append(dic_cui_emb[str(cui)])
-    for addi in range(add_num):
-        CUIs_embedding_test.append(CUIs_embedding_test[random.randint(0, batch_size)])
-    CUIs_embedding_test = np.array(CUIs_embedding_test)
-    CUIs_embedding_test_input = tf.convert_to_tensor(CUIs_embedding_test, dtype=tf.float32)
-    if True:
+    while (epoch_num < epochs):
+        if epoch_num%epoch_MRR==10:
+            MRR=[]
+            rank_total=[]
+            dic_snps_recall10={}
+            dic_snps_recall50={}
+
+            CUIs_all_covered=list(pd.read_csv(dirr+file_CUIs_target)["CUIs"])
+            CUIs_embedding_test = []
+            add_num = batch_size - len(CUIs_all_covered) % batch_size
+            batch_size_test = len(CUIs_all_covered) + add_num
+            for cui in CUIs_all_covered:
+                CUIs_embedding_test.append(dic_cui_emb[str(cui)])
+            for addi in range(add_num):
+                CUIs_embedding_test.append(CUIs_embedding_test[random.randint(0, batch_size)])
+            CUIs_embedding_test = np.array(CUIs_embedding_test)
+            CUIs_embedding_test_input = tf.convert_to_tensor(CUIs_embedding_test, dtype=tf.float32)
+            snps_test = 0
+
+            batch_max = int(len(CUIs_embedding_test_input) / batch_size)
+            for snps_i in range(len(eval_SNPs)):
+                snps_index = eval_SNPs[snps_i]
+                snps = dic_index_snps[snps_index]
+
+                pair_snps_cui = str(snps_index) + "_snps_cui_" + str(eval_index[snps_i])
+                dic_snps_recall10[pair_snps_cui] = 0
+                dic_snps_recall50[pair_snps_cui] = 0
+
+                snps_test += 1
+                embedding_snps = dic_snpsname_emb_all[snps]
+                embedding_snps = np.tile(embedding_snps, (batch_size_test, 1))
+                embedding_snps_input = tf.convert_to_tensor(embedding_snps, dtype=tf.float32)
+
+                embedding_gene = dic_gene_emb[dic_snps_gene[snps]]
+                embedding_gene = np.tile(embedding_gene, (batch_size_test, 1))
+                embedding_gene_input = tf.convert_to_tensor(embedding_gene, dtype=tf.float32)
+
+                prediction_all = []
+                feature_snps_all = []
+                feature_cuis_all = []
+                for batch_i in range(batch_max):
+                    prediction, loss_vae, feature_snps, feature_cuis,feature_temp1_,feature_temp2_,feature_snp_mean,_,_ = model(
+                        [embedding_snps_input[batch_i * batch_size:(batch_i + 1) * batch_size, :],
+                         CUIs_embedding_test_input[batch_i * batch_size:(batch_i + 1) * batch_size, :],
+                         embedding_snps_input[batch_i * batch_size:(batch_i + 1) * batch_size, :],
+                         embedding_gene_input[batch_i * batch_size:(batch_i + 1) * batch_size, :],
+                         CUIs_embedding_test_input[batch_i * batch_size:(batch_i + 1) * batch_size, :],
+                         embedding_gene_input[batch_i * batch_size:(batch_i + 1) * batch_size, :],
+                         embedding_snps_input[batch_i * batch_size:(batch_i + 1) * batch_size, :],
+                         embedding_gene_input[batch_i * batch_size:(batch_i + 1) * batch_size, :],
+                         embedding_snps_input[batch_i * batch_size:(batch_i + 1) * batch_size, :],
+                         embedding_snps_input[batch_i * batch_size:(batch_i + 1) * batch_size, :],
+                         embedding_snps_input[batch_i * batch_size:(batch_i + 1) * batch_size, :],
+                         embedding_snps_input[batch_i * batch_size:(batch_i + 1) * batch_size, :]])
+                    prediction_all.append(prediction.numpy())
+                    feature_snps_all.append(feature_snps.numpy())
+                    feature_cuis_all.append(feature_cuis.numpy())
+                prediction_all = np.array(prediction_all).reshape((batch_size * batch_max, -1))
+                prediction_all = list(prediction_all)[0:len(CUIs_all_covered)]  # tf.nn.sigmoid(prediction)
+
+                index_ranking = len(prediction_all) + 1 - ss.rankdata(prediction_all, method='max')
+
+                MRR.append(1.0 / index_ranking[eval_index[snps_i]])
+                rank_total.append(index_ranking[eval_index[snps_i]])
+
+                if index_ranking[eval_index[snps_i]] < 51:
+                    dic_snps_recall50[pair_snps_cui] = dic_snps_recall50[pair_snps_cui] + 1
+                    if index_ranking[eval_index[snps_i]] < 11:
+                        dic_snps_recall10[pair_snps_cui] = dic_snps_recall10[pair_snps_cui] + 1
+
+            MRR=np.mean(MRR)
+            recall50=1.0*np.sum(list(dic_snps_recall50.values()))/len(eval_SNPs)
+            recall10 = 1.0 * np.sum(list(dic_snps_recall10.values())) / len(eval_SNPs)
+            print("---------------MRR: ", MRR, "recall10: ", recall10, "recall50: ", recall50, "rank_mean: ",
+                  np.mean(rank_total), "rank_median: ", np.median(rank_total))
+        #########################################for test######################################
+        epoch_num += 1
+        train_label = []
+        train_prediction = []
+        i_number = -1
+        except_number=0
+        for traindata_snps,traindata_cuis, traindata_Y,unlabel_snps,unlabel_snps_gene, unlabel_disease,traindata_gene,traindata_gene_ppi_1, traindata_gene_ppi_2, train_gene_weight, \
+                traindata_snps_positive,traindata_snps_positive_gene,traindata_snps_negative,traindata_snps_negative_gene,train_gene_PPI_p1_weight in ds_train:
+            i_number += 1
+            if True:
+                loss,prediction, label =  \
+                    train_step(model, epoch_num,traindata_snps, traindata_cuis,traindata_Y, unlabel_snps,unlabel_snps_gene,
+                               unlabel_disease,traindata_gene,traindata_gene_ppi_1, traindata_gene_ppi_2,train_gene_weight,
+                               traindata_snps_positive,traindata_snps_positive_gene,traindata_snps_negative,traindata_snps_negative_gene,train_gene_PPI_p1_weight)
+
+            if i_number == 0:
+                train_prediction = np.array(prediction)
+                train_label = np.array(label)
+            else:
+                train_prediction = np.concatenate((train_prediction, np.array(prediction)), axis=0)
+                train_label = np.concatenate((train_label, np.array(label)), axis=0)
+
+        AUC_overall_train = roc_auc_score(train_label, train_prediction)
+        if epoch_num % epoch_show == 0 or epoch_num > epochs - 3:
+            label_valid = []
+            pred_valid = []
+            snps_valid=[]
+            pair_valid=[]
+            dic_cui_prediction={}
+            dic_cui_snps={}
+            dic_cui_label={}
+            dic_snps_prediction = {}
+            dic_snps_cuis = {}
+            dic_snps_label = {}
+            i_number = -1
+
+            for testdata_cuis,testdata_snps,testdata_Y,test_names,test_pair,testdata_cuis_gene in ds_test:
+                i_number+=1
+                label, prediction = valid_step(model, testdata_snps, testdata_cuis, testdata_Y,testdata_cuis_gene)
+                if i_number == 0:
+                    pred_valid = np.array(prediction)
+                    label_valid = np.array(testdata_Y.numpy())
+                    snps_valid = np.array(test_names.numpy())
+                    pair_valid = np.array(test_pair.numpy())
+                else:
+                    pred_valid = np.concatenate((pred_valid, np.array(prediction)), axis=0)
+                    label_valid = np.concatenate((label_valid, np.array(testdata_Y.numpy())), axis=0)
+                    snps_valid = np.concatenate((snps_valid, np.array(test_names.numpy())), axis=0)
+                    pair_valid = np.concatenate((pair_valid, np.array(test_pair.numpy())), axis=0)
+
+            pred_valid=np.array(pred_valid).reshape((-1, 1))
+            label_valid = np.array(label_valid).reshape((-1, 1))
+            snps_valid = np.array(snps_valid).reshape((-1, 1))
+            pair_valid = np.array(pair_valid).reshape((-1, 1))
+
+            label_all=[]
+            prediction_all=[]
+
+            CUIs_val=[]
+            SNPs_val=[]
+            prediction_val=[]
+            label_val=[]
+            for rowi in range(len(pred_valid)):
+                snps=str(pair_valid[rowi]).split("_")[0]
+                cui = str(pair_valid[rowi]).split("_")[1]
+                prediction = pred_valid[rowi][0]
+                label = label_valid[rowi][0]
+
+                SNPs_val.append(snps_valid[rowi][0])
+                CUIs_val.append(cui[0:-2])
+                prediction_val.append(prediction)
+                label_val.append(label)
+
+                label_all.append(label)
+                prediction_all.append(prediction)
+
+                dic_cui_prediction.setdefault(cui,[]).append(prediction)
+                dic_cui_label.setdefault(cui, []).append(label)
+
+                dic_snps_prediction.setdefault(snps_valid[rowi][0], []).append(prediction)
+                dic_snps_label.setdefault(snps_valid[rowi][0], []).append(label)
+
+            df = pd.DataFrame({})
+            print("-------------saving SNP_CUI_score_label_test: len prediction_val: ",len(prediction_val))
+            df["SNPs"] = SNPs_val
+            df["CUI"] = CUIs_val
+            df["score"] = prediction_val
+            df["label"] = label_val
+            df.to_csv(dirr_results + "SNP_CUI_score_label_test.csv", index=False)
+
+            AUC_SNPs=[]
+            AUC_SNPs_name=[]
+            AUC_cuis=[]
+            AUC_cui_name=[]
+
+            PRC_gain_SNPs=[]
+            PRC_gain_cuis=[]
+            PRC_SNPs=[]
+
+            PRC_cuis=[]
+            PRC_cui_name=[]
+            PRC_SNPs_name = []
+            for snps in dic_snps_prediction:
+                if np.sum(dic_snps_label[snps]) > 0 and not np.sum(dic_snps_label[snps])==len(dic_snps_label[snps]):
+                    # print ("dic_snps_label[snps]: ",len(dic_snps_label[snps]))
+                    # print("dic_snps_prediction[snps]: ", len(dic_snps_prediction[snps]))
+                    auc = roc_auc_score(dic_snps_label[snps], dic_snps_prediction[snps])
+                    AUC_SNPs.append(auc)
+                    AUC_SNPs_name.append(snps)
+
+                    lr_precision, lr_recall, _ = precision_recall_curve(dic_snps_label[snps], dic_snps_prediction[snps])
+                    prc = metrics.auc(lr_recall, lr_precision)
+                    Prevelance = 1.0 * np.sum(dic_snps_label[snps]) / len(dic_snps_label[snps])
+                    prc_gain = 1.0 * (prc - Prevelance) / Prevelance
+                    PRC_gain_SNPs.append(prc_gain)
+                    PRC_SNPs.append(prc)
+                    PRC_SNPs_name.append(snps)
+
+            for cui in dic_cui_prediction:
+                if np.sum(dic_cui_label[cui])>0 and not np.sum(dic_cui_label[cui])==len(dic_cui_label[cui]):
+                    auc = roc_auc_score(dic_cui_label[cui], dic_cui_prediction[cui])
+                    AUC_cuis.append(auc)
+                    AUC_cui_name.append(cui)
+                    lr_precision, lr_recall, _ = precision_recall_curve(dic_cui_label[cui], dic_cui_prediction[cui])
+                    prc = metrics.auc(lr_recall, lr_precision)
+                    Prevelance = 1.0 * np.sum(dic_cui_label[cui]) / len(dic_cui_label[cui])
+                    prc_gain = 1.0 * (prc - Prevelance) / Prevelance
+                    PRC_gain_cuis.append(prc_gain)
+                    PRC_cuis.append(prc)
+                    PRC_cui_name.append(cui)
+
+            df = pd.DataFrame({})
+            df["AUC"] = AUC_cuis
+            df["CUI"] = AUC_cui_name
+            df.to_csv(dirr_results + "AUC_CUI_test.csv", index=False)
+
+            df = pd.DataFrame({})
+            df["AUC"] = AUC_SNPs
+            df["SNP"] = AUC_SNPs_name
+            df.to_csv(dirr_results + "AUC_SNPs_test.csv", index=False)
+
+            df = pd.DataFrame({})
+            df["PRC"] = PRC_cuis
+            df["CUI"] = PRC_cui_name
+            df.to_csv(dirr_results + "PRC_CUI_test.csv", index=False)
+
+            df = pd.DataFrame({})
+            df["PRC"] = PRC_SNPs
+            df["SNP"] = PRC_SNPs_name
+            df.to_csv(dirr_results + "PRC_SNPs_test.csv", index=False)
+
+            if not len(prediction_all)==np.sum(label_all) and np.sum(label_all)>0:
+                AUC_overall = roc_auc_score(label_all, prediction_all)
+                auc_total.append(np.mean(AUC_overall))
+            else:
+                AUC_overall=0.5
+            lr_precision, lr_recall, _ = precision_recall_curve(label_all, prediction_all)
+            PRC_overall = metrics.auc(lr_recall, lr_precision)
+            Prevelance_overall=1.0*np.sum(label_all)/len(label_all)
+            PRC_overall_gain=1.0*(PRC_overall-Prevelance_overall)/Prevelance_overall
+
+            print ("PRC_overall: ",PRC_overall ," prevelance: ",Prevelance_overall, "prevelance gain: ",PRC_overall_gain )
+
+            if epoch_num>10:
+               if np.mean(auc_total[-8:-4])>np.mean(auc_total[-4:]):
+                   epoch_num+=1
+            print("---epoch: %i,  loss: %3f, VAE_loss: %3f, CLIP_loss: %3f, train_loss_ppi: %3f, train_AUC: %3f, auc_overall: %3f,AUC_SNPs: %3f, "
+                  "AUC_disease: %3f prc_gain: %3f , prc_gain_snps: %3f, prc_gain_disease: %3f " % (epoch_num, train_loss.result(),VAE_loss.result(),train_loss_CLIP.result(),train_loss_ppi.result(),
+                     AUC_overall_train,  np.mean(AUC_overall), np.mean(AUC_SNPs),np.mean(AUC_cuis),
+                     PRC_overall_gain,np.mean(PRC_gain_SNPs),np.mean(PRC_gain_cuis)))
+
+            if save_flag == False and epoch_num > epochs - 3:
+                MRR = []
+                dic_snps_recall10 = {}
+                dic_snps_recall50 = {}
+                rank_total=[]
+                save_flag = True
+                CUIs_all_covered = list(pd.read_csv(dirr + file_CUIs_target)["CUIs"])
+                print("---CUIs_all_covered: ", len(CUIs_all_covered))
+
+                CUIs_embedding_test = []
+                add_num = batch_size - len(CUIs_all_covered) % batch_size
+                batch_size_test = len(CUIs_all_covered) + add_num
+                for cui in CUIs_all_covered:
+                    CUIs_embedding_test.append(dic_cui_emb[str(cui)])
+                for addi in range(add_num):
+                    CUIs_embedding_test.append(CUIs_embedding_test[random.randint(0, batch_size)])
+                CUIs_embedding_test = np.array(CUIs_embedding_test)
+                CUIs_embedding_test_input = tf.convert_to_tensor(CUIs_embedding_test, dtype=tf.float32)
+                snps_test = 0
+
+                feature_snps_save=[]
+                feature_cuis_save=[]
+                cuiname_save=[]
+                snpsname_save=[]
+                batch_max = int(len(CUIs_embedding_test_input) / batch_size)
+                MRR_save=[]
+                MRR_SNP=[]
+                MRR_CUI=[]
+                Ranking_save=[]
+
+                for snps_i in range(len(eval_SNPs)):
+                    snps_index = eval_SNPs[snps_i]
+                    snps = dic_index_snps[snps_index]
+
+                    pair_snps_cui = str(snps_index) + "_snps_cui_" + str(eval_index[snps_i])
+                    dic_snps_recall10[pair_snps_cui] = 0
+                    dic_snps_recall50[pair_snps_cui] = 0
+
+                    #dic_snps_recall10[snps_index] = 0
+                    #dic_snps_recall50[snps_index] = 0
+                    snps_test += 1
+                    embedding_snps = dic_snpsname_emb_all[snps]
+                    embedding_snps = np.tile(embedding_snps, (batch_size_test, 1))
+                    embedding_snps_input = tf.convert_to_tensor(embedding_snps, dtype=tf.float32)
+
+                    embedding_gene = dic_gene_emb[dic_snps_gene[snps]]
+                    embedding_gene = np.tile(embedding_gene, (batch_size_test, 1))
+                    embedding_gene_input = tf.convert_to_tensor(embedding_gene, dtype=tf.float32)
+
+                    prediction_all = []
+                    feature_snps_all = []
+                    feature_cuis_all = []
+
+                    for batch_i in range(batch_max):
+                        prediction, loss_vae, feature_snps, feature_cuis,feature_temp1_,feature_temp2_,feature_snp_mean,_,_ = model(
+                            [embedding_snps_input[batch_i * batch_size:(batch_i + 1) * batch_size, :],
+                             CUIs_embedding_test_input[batch_i * batch_size:(batch_i + 1) * batch_size, :],
+                             embedding_snps_input[batch_i * batch_size:(batch_i + 1) * batch_size, :],
+                             embedding_gene_input[batch_i * batch_size:(batch_i + 1) * batch_size, :],
+                             CUIs_embedding_test_input[batch_i * batch_size:(batch_i + 1) * batch_size, :],
+                             embedding_gene_input[batch_i * batch_size:(batch_i + 1) * batch_size, :],
+                             embedding_snps_input[batch_i * batch_size:(batch_i + 1) * batch_size, :],
+                             embedding_gene_input[batch_i * batch_size:(batch_i + 1) * batch_size, :],
+                             embedding_snps_input[batch_i * batch_size:(batch_i + 1) * batch_size, :],
+                             embedding_snps_input[batch_i * batch_size:(batch_i + 1) * batch_size, :],
+                             embedding_snps_input[batch_i * batch_size:(batch_i + 1) * batch_size, :],
+                             embedding_snps_input[batch_i * batch_size:(batch_i + 1) * batch_size, :]])
+                        prediction_all.append(prediction.numpy())
+                        feature_snps_all.append(feature_snps.numpy())
+                        feature_cuis_all.append(feature_cuis.numpy())
+                    prediction_all = np.array(prediction_all).reshape((batch_size * batch_max, -1))
+                    prediction_all = list(prediction_all)[0:len(CUIs_all_covered)]  # tf.nn.sigmoid(prediction)
+                    index_ranking = len(prediction_all) + 1 - ss.rankdata(prediction_all, method='dense')
+                    MRR.append(1.0 / index_ranking[eval_index[snps_i]])
+
+                    MRR_save.append(1.0 / index_ranking[eval_index[snps_i]])
+                    MRR_SNP.append(snps)
+                    MRR_CUI.append(CUIs_all_covered[eval_index[snps_i]])
+                    Ranking_save.append(index_ranking[eval_index[snps_i]])
+
+                    rank_total.append(index_ranking[eval_index[snps_i]])
+                    feature_snps_all = np.array(feature_snps_all).reshape((batch_size * batch_max, -1))
+                    feature_cuis_all = np.array(feature_cuis_all).reshape((batch_size * batch_max, -1))
+                    feature_snps_save.append(feature_snps_all[0])
+                    feature_cuis_save.append(feature_cuis_all[eval_index[snps_i]])
+                    cuiname_save.append(CUIs_all_covered[eval_index[snps_i]])
+                    snpsname_save.append(snps)
+                    if index_ranking[eval_index[snps_i]] < 51:
+                        dic_snps_recall50[pair_snps_cui] = dic_snps_recall50[pair_snps_cui] + 1
+                        if index_ranking[eval_index[snps_i]] < 11:
+                            dic_snps_recall10[pair_snps_cui] = dic_snps_recall10[pair_snps_cui] + 1
+
+                MRR = np.mean(MRR)
+                recall50 = 1.0 * np.sum(list(dic_snps_recall50.values())) / len(eval_SNPs)
+                recall10 = 1.0 * np.sum(list(dic_snps_recall10.values())) / len(eval_SNPs)
+                print("---------------MRR: ", MRR, "recall10: ", recall10, "recall50: ", recall50, "rank_mean: ",np.mean(rank_total), "rank_median: ",np.median(rank_total))
+
+                f = open(dirr_results_main + filename_eval, 'a')
+                f.write("Time_pre: %2f min, weight_vae: %2f, AUC_train :%4f, AUC_overall:%4f, AUC_snps:%4f, AUC_disease:%4f,"
+                            " prc_overall :%4f, prc_overall_gain :%4f, PRC_snps :%4f, PRC_disease:%4f,"
+                        " MRR:%4f, recall10:%4f, recall50:%4f , rank_mean:%2f, rank_median:%2f " %
+                        (time_preprocessing, weight_vae,AUC_overall_train, np.mean(AUC_overall), np.mean(AUC_SNPs),  np.mean(AUC_cuis),
+                                PRC_overall, PRC_overall_gain, np.mean(PRC_SNPs),  np.mean(PRC_cuis), MRR,recall10,recall50,np.mean(rank_total),np.median(rank_total)))
+                f.write("\r")
+                f.close()
+                print("------------------------------------------------- saving predictions end-----------------------------------")
+
+                np.save(dirr_results + "feature_test_snps", np.array(feature_snps_save))
+                np.save(dirr_results + "feature_test_disease", np.array(feature_cuis_save))
+                df = pd.DataFrame({})
+                df["MRR"] = MRR_save
+                df["snps"] = MRR_SNP
+                df["CUI"]=MRR_CUI
+                df["rank"]=Ranking_save
+                df.to_csv(dirr_results + "MRR_snps.csv", index=False)
+
+                df=pd.DataFrame({})
+                df["snps"]=snpsname_save
+                df["cui"]=cuiname_save
+                df.to_csv(dirr_results+"snps_cuis_names_test.csv",index=False)
+                ##################################
+                print ("--------------------begin saving training features of snps-dsiease paris-------------------------------")
+                CUIs_embedding_train = []
+                snps_embedding_train=[]
+                gene_embedding_train=[]
+                cuiname_save = []
+                snpsname_save = []
+                for snps_index,cui,emb_gene in zip(eval_SNPs_train,eval_cui_train,eval_gene_train):
+                    snps = dic_index_snps[snps_index]
+                    snps_embedding_train.append(dic_snpsname_emb_all[snps])
+                    CUIs_embedding_train.append(dic_cui_emb[str(cui)])
+                    gene_embedding_train.append(emb_gene)
+                    cuiname_save.append(cui)
+                    snpsname_save.append(snps)
+                for i in range(batch_size*1):
+                    index_i=random.randint(0,len(snps_embedding_train)-1)
+                    snps_embedding_train.append(snps_embedding_train[index_i])
+                    CUIs_embedding_train.append(CUIs_embedding_train[index_i])
+                    gene_embedding_train.append(gene_embedding_train[index_i])
+                    cuiname_save.append(cuiname_save[index_i])
+                    snpsname_save.append(snpsname_save[index_i])
+
+                snps_embedding_train = np.array(snps_embedding_train)
+                snps_embedding_train = tf.convert_to_tensor(snps_embedding_train, dtype=tf.float32)
+                CUIs_embedding_train = np.array(CUIs_embedding_train)
+                CUIs_embedding_train = tf.convert_to_tensor(CUIs_embedding_train, dtype=tf.float32)
+                gene_embedding_train = np.array(gene_embedding_train)
+                gene_embedding_train = tf.convert_to_tensor(gene_embedding_train, dtype=tf.float32)
+
+                feature_snps_save=[]
+                feature_cuis_save=[]
+                batch_max=int(len(CUIs_embedding_train)/batch_size)-2
+                for batch_i in range(batch_max):
+                    prediction, loss_vae, feature_snps, feature_cuis,feature_temp1_,feature_temp2_,feature_snp_mean,_,_ =\
+                        model( [snps_embedding_train[batch_i*batch_size:(batch_i+1)*batch_size,:],
+                                CUIs_embedding_train[batch_i*batch_size:(batch_i+1)*batch_size,:],
+                             snps_embedding_train[batch_i*batch_size:(batch_i+1)*batch_size,:],
+                                gene_embedding_train[batch_i * batch_size:(batch_i + 1) * batch_size, :],
+                             CUIs_embedding_train[batch_i*batch_size:(batch_i+1)*batch_size,:],
+                            gene_embedding_train[batch_i*batch_size:(batch_i+1)*batch_size,:],
+                                snps_embedding_train[batch_i*batch_size:(batch_i+1)*batch_size,:],
+                                gene_embedding_train[batch_i*batch_size:(batch_i+1)*batch_size,:],
+                                snps_embedding_train[batch_i*batch_size:(batch_i+1)*batch_size,:],
+                                snps_embedding_train[batch_i*batch_size:(batch_i+1)*batch_size,:],
+                                snps_embedding_train[batch_i*batch_size:(batch_i+1)*batch_size,:],
+                                snps_embedding_train[batch_i*batch_size:(batch_i+1)*batch_size,:]])
+                    feature_snps_save.append(feature_snps)
+                    feature_cuis_save.append(feature_cuis)
+                feature_snps_save=np.array(feature_snps_save).reshape((batch_size*batch_max,latent_dim))
+                feature_cuis_save = np.array(feature_cuis_save).reshape((batch_size * batch_max, latent_dim))
+                np.save(dirr_results + "feature_train_snps", np.array(feature_snps_save))
+                np.save(dirr_results + "feature_train_disease", np.array(feature_cuis_save))
+
+                df = pd.DataFrame({})
+                df["snps"] = snpsname_save[0:batch_size*batch_max]
+                df["cui"] = cuiname_save[0:batch_size*batch_max]
+                df.to_csv(dirr_results + "snps_cuis_names_train.csv", index=False)
+                print("--------------------end saving training features of snps-dsiease paris-------------------------------")
+
+
+    if flag_save_unlabel_emb>0:
         if True:
-           if True:
-               if True:
+            if True:
+                if True:
                     CUIs_embedding_train = []
                     snps_embedding_train = []
                     snpsname_un=[]
                     cuis_all = list(pd.read_csv(dirr + file_CUIs_target)["CUIs"])
                     snps_all=list(snps_all_un_prediction)
                     gene_embedding_train=[]
-                    print("snps_all to be predicted: ",len(snps_all))
-
-                    # snps_all=list(set(snps_all)-set(eval_SNPs)-set(eval_SNPs_train))
                     for samplei in range(len(snps_all)):
                         index_cui=random.randint(0,len(cuis_all)-1)
                         #index_snps =samplei# random.randint(0, len(snps_all) - 1)
@@ -487,10 +983,12 @@ def train_model(model,ds_train, ds_test, eval_SNPs,eval_index,epochs,eval_SNPs_t
                     df["snps"] = snpsname_un[0:batch_size * batch_max]
                     df.to_csv(dirr_results + "snps_names_unlabel.csv", index=False)
 
+    if flag_save_unlabel_predict > 0:
+        if True:
+            if True:
                 if True:
                     cuis_all = list(pd.read_csv(dirr + file_CUIs_target)["CUIs"])
                     snps_all = list(snps_all_un_prediction)
-
                     CUIs_all_covered = list(pd.read_csv(dirr +  file_CUIs_target)["CUIs"])
                     CUIs_embedding_test = []
                     add_num= batch_size-len(CUIs_all_covered)%batch_size
@@ -571,7 +1069,11 @@ def train_model(model,ds_train, ds_test, eval_SNPs,eval_index,epochs,eval_SNPs_t
                                 df["snps"] = snps_all[0:snps_num_predict]
                                 df.to_csv(dirr_results + "snps_names_predicted_snps.csv", index=False)
 
-
+        train_loss.reset_states()
+        train_AUC.reset_states()
+        VAE_loss.reset_states()
+        train_loss_CLIP.reset_states()
+        train_loss_ppi.reset_states()
 
 if __name__ == '__main__':
     if not os.path.exists(dirr_save_model):
@@ -592,7 +1094,6 @@ if __name__ == '__main__':
                  flag_negative_filter=flag_negative_filter,flag_cross_gene=flag_cross_gene,flag_cross_cui=flag_cross_cui)
 
     print("---loadding data end -----")
-
     ds_test = tf.data.Dataset.from_tensor_slices(
         (testdata_cuis, testdata_snps, testdata_Y, testdata_names, test_pair, test_gene)). \
         shuffle(buffer_size=batch_size * 1).batch(batch_size).prefetch(tf.data.experimental.AUTOTUNE).cache()

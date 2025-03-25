@@ -18,11 +18,6 @@ tf.keras.backend.set_floatx('float32')
 # os.environ["TF_GPU_ALLOCATOR"]="cuda_malloc_async"
 
 
-
-
-
-
-
 def parse_arguments(parser):
     """Read user arguments"""
     parser.add_argument('--main_dirr', type=str, default="data/",
@@ -178,7 +173,6 @@ file_snp_prediction_genes=ARGS.file_snp_prediction_genes
 file_snp_prediction_gene_embedding=ARGS.file_snp_prediction_gene_embedding
 
 
-
 scale_AE= 50.0
 weight_kl=0.0
 time_preprocessing=0
@@ -199,8 +193,6 @@ if not os.path.exists(dirr_results):
 dirr_results_prediction=dirr_results+"predictions_SNPs/"
 if not os.path.exists(dirr_results_prediction):
     os.mkdir(dirr_results_prediction)
-
-
 
 
 dic_HPO_CUI_valid={}
@@ -401,9 +393,6 @@ def Model_PheMART(input_dim1=768,input_dim2=768+300,kl_weight=weight_kl,latent_d
     similarity_feature2 = tf.nn.softmax(similarity_feature2 / tau_KL, axis=1)
     similarity_input = tf.nn.softmax(similarity_input / tau_KL, axis=1)
 
-    similarity_feature2 = tf.clip_by_value(similarity_feature2, 1e-10, 1.0)
-    similarity_input = tf.clip_by_value(similarity_input, 1e-10, 1.0)
-
     output = (tf.reduce_sum(tf.multiply(feature1_l, feature2_l), axis=-1)) / (
             tf.sqrt(tf.reduce_sum(tf.square(feature1_l), axis=-1)) * tf.sqrt( tf.reduce_sum(tf.square(feature2_l), axis=-1)))
 
@@ -433,12 +422,9 @@ def train_step(model,epoch_num, input_pro_tsr, input_dis_tsr,label,unlabel_snps,
                    input_pro_tsr_positive,input_pro_tsr_positive_gene,input_pro_tsr_negative,input_pro_tsr_negative_gene])
 
         similarity_snp_p = (tf.reduce_sum(tf.multiply(feature_snp_mean, feature_snp_mean_p), axis=-1)) / (
-                    tf.sqrt(tf.reduce_sum(tf.square(feature_snp_mean), axis=-1)) * tf.sqrt(
-                tf.reduce_sum(tf.square(feature_snp_mean_p), axis=-1)))
+                    tf.sqrt(tf.reduce_sum(tf.square(feature_snp_mean), axis=-1)) * tf.sqrt( tf.reduce_sum(tf.square(feature_snp_mean_p), axis=-1)))
 
-        similarity_snp_n = (tf.reduce_sum(tf.multiply(feature_snp_mean, feature_snp_mean_n), axis=-1)) / (
-                tf.sqrt(tf.reduce_sum(tf.square(feature_snp_mean), axis=-1)) * tf.sqrt(
-            tf.reduce_sum(tf.square(feature_snp_mean_n), axis=-1)))
+        similarity_snp_n = (tf.reduce_sum(tf.multiply(feature_snp_mean, feature_snp_mean_n), axis=-1)) / (tf.sqrt(tf.reduce_sum(tf.square(feature_snp_mean), axis=-1)) * tf.sqrt(tf.reduce_sum(tf.square(feature_snp_mean_n), axis=-1)))
 
         distance_snp_postive = tf.maximum(0, 0.2 - similarity_snp_p)
         distance_snp_negative = tf.maximum(0, similarity_snp_n - (-0.2))
@@ -512,7 +498,6 @@ def valid_step(model, input_pro_tsr, input_dis_tsr, label,input_gene_emb):
                input_gene_emb,input_pro_tsr,input_gene_emb,input_pro_tsr,input_pro_tsr,input_pro_tsr,input_pro_tsr])
     valid_AUC.update_state(label, tf.nn.sigmoid(prediction))
     valid_PRC.update_state(label, tf.nn.sigmoid(prediction))
-
     return label.numpy(), prediction.numpy()
 
 def train_model(model,ds_train, ds_test, eval_SNPs,eval_index,epochs,eval_SNPs_train,eval_cui_train,eval_gene_train,eval_gene_test):
@@ -946,17 +931,18 @@ def train_model(model,ds_train, ds_test, eval_SNPs,eval_index,epochs,eval_SNPs_t
                 print("--------------------end saving training features of snps-dsiease paris-------------------------------")
 
                 ##################################
-                if flag_save_unlabel_emb>0:
-                    print( "--------------------begin saving unlabeled  snps-------------------------------")
+
+    if flag_save_unlabel_emb>0:
+        if True:
+            if True:
+                if True:
                     CUIs_embedding_train = []
                     snps_embedding_train = []
                     snpsname_un=[]
                     cuis_all = list(pd.read_csv(dirr + file_CUIs_target)["CUIs"])
                     snps_all=list(snps_all_un_prediction)
                     gene_embedding_train=[]
-                    print("snps_all to be predicted: ",len(snps_all))
 
-                    # snps_all=list(set(snps_all)-set(eval_SNPs)-set(eval_SNPs_train))
                     for samplei in range(len(snps_all)):
                         index_cui=random.randint(0,len(cuis_all)-1)
                         #index_snps =samplei# random.randint(0, len(snps_all) - 1)
@@ -999,8 +985,10 @@ def train_model(model,ds_train, ds_test, eval_SNPs,eval_index,epochs,eval_SNPs_t
                     df["snps"] = snpsname_un[0:batch_size * batch_max]
                     df.to_csv(dirr_results + "snps_names_unlabel.csv", index=False)
 
-                if flag_save_unlabel_predict > 0:
-                    print("-------------------- begin saving snps predictions-------------------------------")
+    if flag_save_unlabel_predict > 0:
+        if True:
+            if True:
+                if True:
                     cuis_all = list(pd.read_csv(dirr + file_CUIs_target)["CUIs"])
                     snps_all = list(snps_all_un_prediction)
 
@@ -1085,7 +1073,6 @@ def train_model(model,ds_train, ds_test, eval_SNPs,eval_index,epochs,eval_SNPs_t
                                 df = pd.DataFrame({})
                                 df["snps"] = snps_all[0:snps_num_predict]
                                 df.to_csv(dirr_results + "snps_names_predicted_snps.csv", index=False)
-
         train_loss.reset_states()
         train_AUC.reset_states()
         VAE_loss.reset_states()
@@ -1110,8 +1097,8 @@ if __name__ == '__main__':
                  snps_remove=snps_all_un_prediction,flag_debug=flag_debug,
                  flag_negative_filter=flag_negative_filter,flag_cross_gene=flag_cross_gene,flag_cross_cui=flag_cross_cui)
 
-    print("---loadding data end -----")
 
+    print("---loadding data end -----")
     ds_test = tf.data.Dataset.from_tensor_slices(
         (testdata_cuis, testdata_snps, testdata_Y, testdata_names, test_pair, test_gene)). \
         shuffle(buffer_size=batch_size * 1).batch(batch_size).prefetch(tf.data.experimental.AUTOTUNE).cache()
