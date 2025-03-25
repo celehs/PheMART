@@ -1,7 +1,9 @@
-tensorflow==2.5.2
-pandas
-numpy
-click
-scipy
-scikit-learn
-configparser
+tensorflow-gpu==2.5.2
+pandas==1.3.5
+numpy==1.19.5
+click==8.1.8
+scipy==1.7.3
+six==1.15.0
+scikit-learn==1.0.2
+configparser==5.3.0
+tensorboard==2.11.2
