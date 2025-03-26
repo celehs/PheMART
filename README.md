@@ -75,12 +75,12 @@ PheMART requires different input datasets depending on the use case.
 ### 2. Fine-Tuning or Training a New Model
 - **Variant Embeddings**: Precomputed embeddings for missense variants.
 - **Phenotype Embeddings**: Precomputed phenotype representation. The LLM phenotype embeddings have been provided and the EHR embedding will be provided upon request.
-- **Training Labels (if available)**: Variant-phenotype annotations in **CSV** format.
+- **Training Labels**: Variant-phenotype annotations in **CSV** format.
   - **Example format** (CSV):
   ```
   variant_id,gene,phenotype_CUI
-  NM_002074.5(GNB1):c.388G>A (p.Glu130Lys),GeneX,C3276355
-  NM_003036.4(SKI):c.68A>C (p.Gln23Pro),GeneY,C1321551
+  NM_002074.5(GNB1):c.388G>A (p.Glu130Lys),GNB1,C3276355
+  NM_003036.4(SKI):c.68A>C (p.Gln23Pro),SKI,C1321551
   ```
 
 **Note:** We also provide scripts to preprocess user-provided patient-level data for generating EHR embeddings.
@@ -138,7 +138,7 @@ PheMART generates different outputs depending on the mode of operation.
   - Higher scores indicate a higher likelihood of pathogenicity.
 
 ### 2. Training Mode
-- `training_logs.txt`: Training loss, accuracy, and hyperparameters.
+- `training_logs.txt`: Training loss, training performance and hyperparameters.
 - `results_validations.txt`: Model performance on the validation dataset.
 
 ---
@@ -147,9 +147,9 @@ PheMART generates different outputs depending on the mode of operation.
 The `submit.sh` script automates the following computational steps:
 
 1. **Data Preprocessing**
-   - Converts CSV variant data into embeddings.
+   - Get variant embeddings.
    - Get phenotype embeddings.
-   - Splits data into training and validation sets.
+   - Split data into training and validation sets.
 
 2. **Model Training / Fine-Tuning**
    - Loads the dataset and initializes the neural network.
@@ -158,6 +158,6 @@ The `submit.sh` script automates the following computational steps:
 
 3. **Prediction and Evaluation**
    - If in inference mode, loads the trained model and predicts the variant's relevance to all the phenotypes investigated.
-   - Saves predictions in `results.csv`.
+   - Saves predictions.
 
 ---
