@@ -121,11 +121,19 @@ bash submit.sh --train --file_annotations /path/to/annotations --file_snps_label
 PheMART generates different outputs depending on the mode of operation.
 
 ### 1. Inference Mode (Using Pre-trained Model)
-- `results.csv`: Contains predicted pathogenicity scores for each variant.
+- `results_score.csv`: For each variant, contain the ranked scores per their similarities to the phenotypes;
+- `results_CUI.csv`: Contains predicted phenotypes ranked by the their scores to the SNPs.
+- For example, in `results_score.csv`:
   ```
-  variant_id, phenotype, predicted_score
-   NM_002074.5(GNB1):c.388G>A (p.Glu130Lys),C1535926, 0.85
-  NM_003036.4(SKI):c.68A>C (p.Gln23Pro),C1321551, 0.15
+  NM_002074.5(GNB1):c.388G>A (p.Glu130Lys), NM_003036.4(SKI):c.68A>C (p.Gln23Pro)
+   0.821,0.736
+  0.702,0.625
+  ```
+  - For example, in `results_CUI.csv`:
+  ```
+  NM_002074.5(GNB1):c.388G>A (p.Glu130Lys), NM_003036.4(SKI):c.68A>C (p.Gln23Pro)
+   C1321551,C1535926
+  C1321557,C1321632
   ```
   - Higher scores indicate a higher likelihood of pathogenicity.
 
