@@ -17,7 +17,6 @@ import argparse
 tf.keras.backend.set_floatx('float32')
 # os.environ["TF_GPU_ALLOCATOR"]="cuda_malloc_async"
 
-
 def parse_arguments(parser):
     """Read user arguments"""
     parser.add_argument('--main_dirr', type=str, default="data/",
@@ -26,9 +25,9 @@ def parse_arguments(parser):
                         help='file including target CUIs')
     parser.add_argument('--file_annotations', type=str, default="Clivar_snps_disease_Pathogenic_Likely_4_11_subset.csv",
                         help='0-1 to denote if reload the model')
-    parser.add_argument('--file_snps_labeled', type=str, default="ClinVar_binary_label_0201.csv",
+    parser.add_argument('--file_snps_labeled', type=str, default="Binary_labeled_230201_clinvar.csv",
                         help='file containing list of labeled snps')
-    parser.add_argument('--file_snps_labeled_embedding', type=str, default="ClinVar_binary_label_0201_embedding.npy",
+    parser.add_argument('--file_snps_labeled_embedding', type=str, default="Binary_labeled_230201_clinvar_embedding.npy",
                         help='filescontaining embeddings of labeled snps')
     parser.add_argument('--file_snps_unlabeled', type=str, default="unlabeled_230201_clinvar.csv",
                         help='file containing list of unlabeled snps')
@@ -42,12 +41,10 @@ def parse_arguments(parser):
                         help='file containing disease embeddings from EHR')
     parser.add_argument('--file_snps_gene_map', type=str, default="Mapping_snps_genes.csv",
                         help='file containing mapping of snps to genes')
-    parser.add_argument('--file_snp_prediction', type=str, default="snps_prediction.csv",
+    parser.add_argument('--file_snps_prediction', type=str, default="snps_prediction.csv",
                         help='files containing list of snps for prediction')
-    parser.add_argument('--file_snp_prediction_embedding', type=str, default="snps_prediction_embedding.npy",
+    parser.add_argument('--file_snps_prediction_embedding', type=str, default="snps_prediction_embedding.npy",
                         help='files containing embeddings of snps for prediction')
-    parser.add_argument('--file_snp_prediction_gene_embedding', type=str, default="snps_prediction_embedding_gene.npy",
-                        help='files containing embeddings of genes of snps for prediction')
     parser.add_argument('--flag_reload', type=int, default=0,
                         help='0-1 to denote if reload the model')
     parser.add_argument('--flag_modelsave', type=int, default=0,
@@ -96,18 +93,14 @@ def parse_arguments(parser):
                         help='if using flag_hard_negative')
     parser.add_argument('--model_savename', type=str,default="interaction_dim72_negative_mining",
                         help='model name to save ')
-    parser.add_argument('--flag_save_unlabel_emb', type=int, default=0,
-                        help='if predict and save unlabeled snps embeddings')
     parser.add_argument('--flag_cross_cui', type=int, default=0,
                         help='if flag_cross_cui validation')
     parser.add_argument('--flag_cross_gene', type=int, default=0,
                         help='if cross-gene validation')
     parser.add_argument('--content_unlabel', type=str, default="UDN",
                         help='what unlabel SNPs to predict')
-    parser.add_argument('--flag_save_unlabel_predict', type=int, default=1,
+    parser.add_argument('--flag_predict', type=int, default=1,
                         help='if predict and save unlabeled snps predictions')
-    parser.add_argument('--savename_to_predict', type=str, default="snps_prediction_unlabeled_all.csv",
-                        help='filename to save unlabeled snps predictions')
     parser.add_argument('--dirr_results_main', type=str, default="results/",
                         help='Directory of to save results ')
     parser.add_argument('--dirr_save_model', type=str, default="Model_save/",
@@ -118,7 +111,6 @@ def parse_arguments(parser):
                         help='filename to save the prediction evaluations')
     args = parser.parse_args()
     return args
-
 
 PARSER = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 ARGS = parse_arguments(PARSER)
@@ -147,9 +139,7 @@ tau_softmax=ARGS.tau_softmax
 flag_hard_negative=ARGS.flag_hard_negative
 flag_debug=ARGS.flag_debug
 model_savename=ARGS.model_savename
-flag_save_unlabel_emb=ARGS.flag_save_unlabel_emb
-flag_save_unlabel_predict=ARGS.flag_save_unlabel_predict
-savename_to_predict=ARGS.savename_to_predict
+flag_predict=ARGS.flag_predict
 dirr_save_model= ARGS.dirr_save_model
 dirr_results_main=ARGS.dirr_results_main
 filename_eval=ARGS.filename_eval
@@ -167,10 +157,10 @@ file_wildtype_embedding=ARGS.file_wildtype_embedding
 file_disease_embedding_LLM=ARGS.file_disease_embedding_LLM
 file_disease_embedding_EHR=ARGS.file_disease_embedding_EHR
 file_snps_gene_map=ARGS.file_snps_gene_map
-file_snp_prediction=ARGS.file_snp_prediction
-file_snp_prediction_embedding=ARGS.file_snp_prediction_embedding
-file_snp_prediction_genes=ARGS.file_snp_prediction_genes
-file_snp_prediction_gene_embedding=ARGS.file_snp_prediction_gene_embedding
+ 
+file_snps_prediction=ARGS.file_snps_prediction
+file_snps_prediction_embedding=ARGS.file_snps_prediction_embedding
+
 
 
 scale_AE= 50.0
@@ -241,14 +231,12 @@ embedding=np.array(embedding)
 df = pd.read_csv(dirr+file_snps_labeled)
 SNPs=list(df[df.columns[0]])
 print (" labeled SNPs: ",len(SNPs))
-dic_snpsname_emb_binary={}
 dic_snpsname_emb_all={}
 dic_snpsname_emb_sameGENE={}
 for rowi in range(len(SNPs)):
     snps_i=str(SNPs[rowi]).strip()
     if  str(SNPs[rowi]).strip() in dic_snps_gene and dic_snps_gene[str(SNPs[rowi]).strip()] in dic_gene_emb:
         gene=dic_snps_gene[snps_i]
-        dic_snpsname_emb_binary[str(SNPs[rowi]).strip()] = np.array(embedding[rowi, :])
         dic_snpsname_emb_all[snps_i] = np.array(embedding[rowi, :])
         if gene in dic_gene_labeled:
             dic_snpsname_emb_sameGENE[snps_i]=1
@@ -270,13 +258,35 @@ for rowi in range(len(SNPs)):
             dic_snpsname_emb_sameGENE[snps_i] = 1
         dic_snpsname_emb_un[str(SNPs[rowi]).strip()] = np.array(embedding[rowi, :])
         dic_snpsname_emb_all[str(SNPs[rowi]).strip()] = np.array(embedding[rowi, :])
-snps_all_un_prediction=set(list(dic_snpsname_emb_sameGENE.keys()))
+
+########################SNPs to be predicted##################
+df_prediction=pd.read_csv(file_snps_prediction)
+snps_all_prediction=list(set(list(df_prediction["SNPs"])))
+for snp, gene in zip(df_prediction["SNPs"].to_list, df_prediction["Gene"].to_list):
+    if gene in dic_gene_emb:
+        dic_snps_gene[snp]=gene
+print("SNPs to be predicted: ",len(snps_all_prediction))
+embedding=np.load(dirr+file_snps_prediction_embedding)
+embedding=np.array(embedding)
+df = pd.read_csv(dirr+file_snps_prediction)
+SNPs=list(df[df.columns[0]])
+for rowi in range(len(SNPs)):
+    snps_i=str(SNPs[rowi]).strip()
+    if  str(SNPs[rowi]).strip() in dic_snps_gene and dic_snps_gene[str(SNPs[rowi]).strip()] in dic_gene_emb:
+        gene=dic_snps_gene[snps_i]
+        dic_snpsname_emb_all[snps_i] = np.array(embedding[rowi, :])
+        if snps_i in dic_snps_index :
+            dic_snps_emb[dic_snps_index[str(SNPs[rowi]).strip()]]=np.array(embedding[rowi,:])
+            dic_snpsname_emb[str(SNPs[rowi]).strip()] = np.array(embedding[rowi, :])
+########################SNPs to be predicted##################
+
+
 
 ########### readding disease embedding ##################
 df_ehr=pd.read_csv(dirr+file_disease_embedding_EHR)
-df=pd.read_csv(dirr+file_disease_embedding_LLM)
-embedding_LLM=np.array(df[df.columns[2:]])
-embedding_EHR=np.array(df_ehr[df.columns[2:]])
+df_LLM=pd.read_csv(dirr+file_disease_embedding_LLM)
+embedding_LLM=np.array(df_LLM[df_LLM.columns[2:]])
+embedding_EHR=np.array(df_ehr[df_ehr.columns[2:]])
 embedding_cui_all=[]
 CUIs = list(pd.read_csv(dirr+file_disease_embedding_LLM)[df.columns[0]])
 for rowi in range(len(CUIs)):
@@ -909,7 +919,7 @@ def train_model(model,ds_train, ds_test, eval_SNPs,eval_index,epochs,eval_SNPs_t
                 df.to_csv(dirr_results + "snps_cuis_names_train.csv", index=False)
 
 
-    if flag_save_unlabel_emb>0:
+    if flag_predict>0:
         if True:
             if True:
                 if True:
@@ -917,7 +927,7 @@ def train_model(model,ds_train, ds_test, eval_SNPs,eval_index,epochs,eval_SNPs_t
                     snps_embedding_train = []
                     snpsname_un=[]
                     cuis_all = list(pd.read_csv(dirr + file_CUIs_target)["CUIs"])
-                    snps_all=list(snps_all_un_prediction)
+                    snps_all=list(snps_all_prediction)
                     gene_embedding_train=[]
 
                     for samplei in range(len(snps_all)):
@@ -962,7 +972,7 @@ def train_model(model,ds_train, ds_test, eval_SNPs,eval_index,epochs,eval_SNPs_t
                     df["snps"] = snpsname_un[0:batch_size * batch_max]
                     df.to_csv(dirr_results + "snps_names_unlabel.csv", index=False)
 
-    if flag_save_unlabel_predict > 0:
+    if flag_predict > 0:
         if True:
             if True:
                 if True:
@@ -980,7 +990,7 @@ def train_model(model,ds_train, ds_test, eval_SNPs,eval_index,epochs,eval_SNPs_t
                     snps_num_predict = 0
 
                     batch_max = int(batch_size_test / batch_size)
-                    for snps in snps_all_un_prediction:
+                    for snps in snps_all_prediction:
                         if snps==snps and snps in dic_snpsname_emb_all:
                             snps_num_predict += 1
                             embedding_snps = dic_snpsname_emb_all[snps]
@@ -1040,8 +1050,7 @@ if __name__ == '__main__':
      unlabel_snps,unlabel_gene,unlabel_disease,eval_SNPs_train,eval_cui_train,train_gene,train_gene_ppi_1, train_gene_ppi_2,test_gene,eval_gene_train,eval_gene_test,train_gene_weight,
      traindata_snps_positive,traindata_snps_positive_gene,traindata_snps_negative,traindata_snps_negative_gene,train_gene_PPI_p1_weight)=\
         loaddata(train_snps_ratio=train_ratio,negative_disease=negative_disease,
-                 negative_snps=negative_snps,flag_hard_mining=flag_hard_negative,
-                 snps_remove=snps_all_un_prediction,flag_debug=flag_debug,
+                 negative_snps=negative_snps,flag_hard_mining=flag_hard_negative,flag_debug=flag_debug,
                  flag_negative_filter=flag_negative_filter,flag_cross_gene=flag_cross_gene,flag_cross_cui=flag_cross_cui)
 
     print("---loadding data end -----")
