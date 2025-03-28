@@ -177,8 +177,7 @@ scale_AE= 50.0
 weight_kl=0.0
 time_preprocessing=0
 epoch_show = 3
-epoch_MRR=500
-if ARGS.epochs<3:
+if ARGS.epochs<2:
     learning_rate=0.0000001
 optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
 
@@ -193,7 +192,6 @@ if not os.path.exists(dirr_results):
 dirr_results_prediction=dirr_results+"predictions_SNPs/"
 if not os.path.exists(dirr_results_prediction):
     os.mkdir(dirr_results_prediction)
-
 
 dic_HPO_CUI_valid={}
 dic_snps_cui={}
@@ -235,9 +233,9 @@ for index, snps in zip(df["snps_index"],df["snps"]):
         dic_gene_labeled[gene] = 1
         dic_snps_index[str(snps).strip()] = int(index)
         dic_index_snps[int(index)]=str(snps).strip()
-
 CUIs_all_covered=list(pd.read_csv(dirr+file_CUIs_target)["CUIs"])
 ###########snps embedding #############################snps embedding ##################
+
 embedding=np.load(dirr+file_snps_labeled_embedding)
 embedding=np.array(embedding)
 df = pd.read_csv(dirr+file_snps_labeled)
@@ -252,7 +250,6 @@ for rowi in range(len(SNPs)):
         gene=dic_snps_gene[snps_i]
         dic_snpsname_emb_binary[str(SNPs[rowi]).strip()] = np.array(embedding[rowi, :])
         dic_snpsname_emb_all[snps_i] = np.array(embedding[rowi, :])
-
         if gene in dic_gene_labeled:
             dic_snpsname_emb_sameGENE[snps_i]=1
         if snps_i in dic_snps_index :
@@ -278,17 +275,15 @@ snps_all_un_prediction=set(list(dic_snpsname_emb_sameGENE.keys()))
 ########### readding disease embedding ##################
 df_ehr=pd.read_csv(dirr+file_disease_embedding_EHR)
 df=pd.read_csv(dirr+file_disease_embedding_LLM)
-embedding=np.array(df[df.columns[2:]])
+embedding_LLM=np.array(df[df.columns[2:]])
+embedding_EHR=np.array(df_ehr[df.columns[2:]])
 embedding_cui_all=[]
 CUIs = list(pd.read_csv(dirr+file_disease_embedding_LLM)[df.columns[0]])
-if not len(CUIs)==len(embedding):
-    print ("-----------------------------------------error: ",  "len(CUIs) unequal to len(embedding)--------------------------","error---------------")
 for rowi in range(len(CUIs)):
     cui=CUIs[rowi]
     if cui in df_ehr:
-        embedding_EHR=np.array(df_ehr[cui])
-        dic_cui_emb[str(CUIs[rowi])] = np.concatenate((np.array(embedding[rowi]),embedding_EHR),axis=-1)
-        embedding_cui_all.append(np.concatenate((np.array(embedding[rowi]),embedding_EHR),axis=-1))
+        dic_cui_emb[str(CUIs[rowi])] = np.concatenate((np.array(embedding_LLM[rowi]),np.array(embedding_EHR[rowi])),axis=-1)
+        embedding_cui_all.append(np.concatenate((np.array(embedding_LLM[rowi]),np.array(embedding_EHR[rowi])),axis=-1))
 print ("dic_cui_emb len: ",len(dic_cui_emb))
 dic_cui_emb["benign"] = np.min(np.array(embedding_cui_all),axis=0)
 ########### end readding disease embedding ##################
@@ -322,9 +317,7 @@ def Model_PheMART(input_dim1=768,input_dim2=768+300,kl_weight=weight_kl,latent_d
     encoder1_layer1 = layers.Dense(120, activation=tf.nn.leaky_relu, name="encoder1/fcn1",dtype='float32')
     encoder1_layer1_residual = layers.Dense(120, activation=tf.nn.leaky_relu, name="encoder1/fcn1_residual",dtype='float32')
     encoder1_layer1_residual_h1 = layers.Dense(120, activation=tf.nn.leaky_relu, name="encoder1/fcn1_residual_h1",dtype='float32')
-
     encoder1_layer2_mean = layers.Dense(int(1.5*latent_dim), activation=tf.nn.leaky_relu, name="encoder1/fcn2/mean",dtype='float32')
-
     encoder1_layer3= layers.Dense(latent_dim, activation=tf.nn.leaky_relu, name="encoder1/fcn3", dtype='float32')
     encoder1_layer3_h1 = layers.Dense(latent_dim, activation=tf.nn.leaky_relu, name="encoder1/fcn3_h1", dtype='float32')
 
@@ -344,18 +337,17 @@ def Model_PheMART(input_dim1=768,input_dim2=768+300,kl_weight=weight_kl,latent_d
     decoder2_layer1 = layers.Dense(int(768*1.5), activation=tf.nn.leaky_relu, name="decoder2/fcn1",dtype='float32')
     decoder2_layer2 = layers.Dense(768, activation=None, name="decoder2/fcn2",dtype='float32')
     # M_interaction = tf.Variable(np.random.normal(0, 1, size=(latent_dim, latent_dim)), trainable=True, dtype=tf.float32, name="interaction_M")
-    def AE1(input,input_gene):         ####L2 loss
+    def AE1(input,input_gene):
         feature = encoder1_layer1(input)
         feature_gene = encoder1_layer1(input_gene)
         feature_residual = encoder1_layer1_residual(feature-feature_gene)
         feature=feature+feature_residual
         mean=encoder1_layer2_mean(feature)
-        fusioned=mean  #tf.concat([mean,gene_context],axis=1)
-        output=decoder1_layer1(mean)  ###using the mean to recontruct
+        fusioned=mean
+        output=decoder1_layer1(mean)
         output=decoder1_layer2(output)
-
         MSE=tf.reduce_mean(tf.square(input*scale_AE-output))
-        output_gene = decoder1_layer1_gene(mean)  ###using the mean to recontruct
+        output_gene = decoder1_layer1_gene(mean)
         output_gene = decoder1_layer2_gene(output_gene)
         MSE_gene = tf.reduce_mean(tf.square(input_gene* scale_AE - output_gene))
         MSE=MSE+MSE_gene
@@ -366,9 +358,9 @@ def Model_PheMART(input_dim1=768,input_dim2=768+300,kl_weight=weight_kl,latent_d
 
         feature = tf.concat([feature_1, feature_2], axis=-1)
         mean = encoder2_layer2_mean(feature)
-        output_1 = decoder2_layer1(mean)  ###using the mean to recontruct
+        output_1 = decoder2_layer1(mean)
         output_1 = decoder2_layer2(output_1)
-        output_2 = decoder2_layer1_2(mean)  ###using the mean to recontruct
+        output_2 = decoder2_layer1_2(mean)
         output_2 = decoder2_layer2_2(output_2)
         MSE1 = tf.reduce_mean(tf.square(input[:, 0:768] * scale_AE - output_1))
         MSE2 = tf.reduce_mean(tf.square(input[:, 768:] * scale_AE - output_2))
@@ -389,10 +381,8 @@ def Model_PheMART(input_dim1=768,input_dim2=768+300,kl_weight=weight_kl,latent_d
             tf.sqrt(tf.reduce_sum(tf.square(input2_l), axis=-1, keepdims=True))))
     similarity_feature2 = tf.matmul(feature2_l_mean, feature2_l_mean, transpose_b=True) / ((tf.sqrt(tf.reduce_sum(tf.square(feature2_l_mean), axis=-1, keepdims=True))) * (
         tf.sqrt(tf.reduce_sum(tf.square(feature2_l_mean), axis=-1, keepdims=True))))
-
     similarity_feature2 = tf.nn.softmax(similarity_feature2 / tau_KL, axis=1)
     similarity_input = tf.nn.softmax(similarity_input / tau_KL, axis=1)
-
     output = (tf.reduce_sum(tf.multiply(feature1_l, feature2_l), axis=-1)) / (
             tf.sqrt(tf.reduce_sum(tf.square(feature1_l), axis=-1)) * tf.sqrt( tf.reduce_sum(tf.square(feature2_l), axis=-1)))
 
@@ -442,10 +432,8 @@ def train_step(model,epoch_num, input_pro_tsr, input_dis_tsr,label,unlabel_snps,
         loss_ppi = tf.maximum(similarity_PPI_n + margin_ppi - similarity_PPI_p, 0.0)*train_gene_PPI_p1_weight
         loss_ppi= tf.reduce_mean(loss_ppi)
 
-        if epoch_num<epochs/3:
-            tau_softmax_adjust=1.0
-        else:
-            tau_softmax_adjust=1.0
+
+        tau_softmax_adjust=1.0
         if tau_softmax>0.5:
             loss_snps = cce(labels_multi, tf.nn.softmax(tf.transpose(feature_interaction /tau_softmax), axis=-1))*train_gene_weight
             loss_cui = cce(labels_multi, tf.nn.softmax(feature_interaction  / tau_softmax, axis=-1))*train_gene_weight
@@ -506,7 +494,7 @@ def train_model(model,ds_train, ds_test, eval_SNPs,eval_index,epochs,eval_SNPs_t
     auc_total = []
     save_flag=False
     while (epoch_num < epochs):
-        if epoch_num%epoch_MRR==10:
+        if epoch_num%20==5:
             MRR=[]
             rank_total=[]
             dic_snps_recall10={}
@@ -663,7 +651,6 @@ def train_model(model,ds_train, ds_test, eval_SNPs,eval_index,epochs,eval_SNPs_t
                 dic_snps_label.setdefault(snps_valid[rowi][0], []).append(label)
 
             df = pd.DataFrame({})
-            print("-------------saving SNP_CUI_score_label_test: len prediction_val: ",len(prediction_val))
             df["SNPs"] = SNPs_val
             df["CUI"] = CUIs_val
             df["score"] = prediction_val
@@ -684,8 +671,6 @@ def train_model(model,ds_train, ds_test, eval_SNPs,eval_index,epochs,eval_SNPs_t
             PRC_SNPs_name = []
             for snps in dic_snps_prediction:
                 if np.sum(dic_snps_label[snps]) > 0 and not np.sum(dic_snps_label[snps])==len(dic_snps_label[snps]):
-                    # print ("dic_snps_label[snps]: ",len(dic_snps_label[snps]))
-                    # print("dic_snps_prediction[snps]: ", len(dic_snps_prediction[snps]))
                     auc = roc_auc_score(dic_snps_label[snps], dic_snps_prediction[snps])
                     AUC_SNPs.append(auc)
                     AUC_SNPs_name.append(snps)
@@ -735,17 +720,14 @@ def train_model(model,ds_train, ds_test, eval_SNPs,eval_index,epochs,eval_SNPs_t
                 AUC_overall = roc_auc_score(label_all, prediction_all)
                 auc_total.append(np.mean(AUC_overall))
             else:
-                AUC_overall=0.5
+                print("--------error in computing auROC")
+                AUC_overall=0.00000000
             lr_precision, lr_recall, _ = precision_recall_curve(label_all, prediction_all)
             PRC_overall = metrics.auc(lr_recall, lr_precision)
             Prevelance_overall=1.0*np.sum(label_all)/len(label_all)
             PRC_overall_gain=1.0*(PRC_overall-Prevelance_overall)/Prevelance_overall
 
             print ("PRC_overall: ",PRC_overall ," prevelance: ",Prevelance_overall, "prevelance gain: ",PRC_overall_gain )
-
-            if epoch_num>10:
-               if np.mean(auc_total[-8:-4])>np.mean(auc_total[-4:]):
-                   epoch_num+=1
             print("---epoch: %i,  loss: %3f, VAE_loss: %3f, CLIP_loss: %3f, train_loss_ppi: %3f, train_AUC: %3f, auc_overall: %3f,AUC_SNPs: %3f, "
                   "AUC_disease: %3f prc_gain: %3f , prc_gain_snps: %3f, prc_gain_disease: %3f " % (epoch_num, train_loss.result(),VAE_loss.result(),train_loss_CLIP.result(),train_loss_ppi.result(),
                      AUC_overall_train,  np.mean(AUC_overall), np.mean(AUC_SNPs),np.mean(AUC_cuis),
@@ -789,8 +771,6 @@ def train_model(model,ds_train, ds_test, eval_SNPs,eval_index,epochs,eval_SNPs_t
                     dic_snps_recall10[pair_snps_cui] = 0
                     dic_snps_recall50[pair_snps_cui] = 0
 
-                    #dic_snps_recall10[snps_index] = 0
-                    #dic_snps_recall50[snps_index] = 0
                     snps_test += 1
                     embedding_snps = dic_snpsname_emb_all[snps]
                     embedding_snps = np.tile(embedding_snps, (batch_size_test, 1))
@@ -872,7 +852,6 @@ def train_model(model,ds_train, ds_test, eval_SNPs,eval_index,epochs,eval_SNPs_t
                 df["cui"]=cuiname_save
                 df.to_csv(dirr_results+"snps_cuis_names_test.csv",index=False)
                 ##################################
-                print ("--------------------begin saving training features of snps-dsiease paris-------------------------------")
                 CUIs_embedding_train = []
                 snps_embedding_train=[]
                 gene_embedding_train=[]
@@ -928,9 +907,7 @@ def train_model(model,ds_train, ds_test, eval_SNPs,eval_index,epochs,eval_SNPs_t
                 df["snps"] = snpsname_save[0:batch_size*batch_max]
                 df["cui"] = cuiname_save[0:batch_size*batch_max]
                 df.to_csv(dirr_results + "snps_cuis_names_train.csv", index=False)
-                print("--------------------end saving training features of snps-dsiease paris-------------------------------")
 
-                ##################################
 
     if flag_save_unlabel_emb>0:
         if True:
@@ -989,8 +966,6 @@ def train_model(model,ds_train, ds_test, eval_SNPs,eval_index,epochs,eval_SNPs_t
         if True:
             if True:
                 if True:
-                    cuis_all = list(pd.read_csv(dirr + file_CUIs_target)["CUIs"])
-                    snps_all = list(snps_all_un_prediction)
 
                     CUIs_all_covered = list(pd.read_csv(dirr +  file_CUIs_target)["CUIs"])
                     CUIs_embedding_test = []
@@ -1003,16 +978,8 @@ def train_model(model,ds_train, ds_test, eval_SNPs,eval_index,epochs,eval_SNPs_t
                     CUIs_embedding_test = np.array(CUIs_embedding_test)
                     CUIs_embedding_test_input = tf.convert_to_tensor(CUIs_embedding_test, dtype=tf.float32)
                     snps_num_predict = 0
-                    feature_snps_save = []
-                    feature_disease_save=[]
-                    snps_save_all = []
-                    data_save_all = []
+
                     batch_max = int(batch_size_test / batch_size)
-                    CUI_save_all = []
-                    score_save_all = []
-                    dic_snp_score = {}
-                    dic_snp_cuis = {}
-                    top_N = len(CUIs_all_covered)
                     for snps in snps_all_un_prediction:
                         if snps==snps and snps in dic_snpsname_emb_all:
                             snps_num_predict += 1
@@ -1046,33 +1013,13 @@ def train_model(model,ds_train, ds_test, eval_SNPs,eval_index,epochs,eval_SNPs_t
                             prediction_all = list(prediction_all)[0:len(CUIs_all_covered)]  # tf.nn.sigmoid(prediction)
 
                             feature_snps_all = np.array(feature_snps_all).reshape((batch_size * batch_max, -1))
-                            feature_cuis_all = np.array(feature_cuis_all).reshape((batch_size * batch_max, -1))
 
-                            feature_snps_save.append(feature_snps_all[0])
+                            prediction_all, CUIs_all_covered = zip(*sorted(zip(prediction_all, CUIs_all_covered), reverse=True))
+                            df = pd.DataFrame({})
+                            df["Phenotype"]=CUIs_all_covered
+                            df["Score"]=prediction_all
+                            df.to_csv(dirr_results + str(snps)+".csv",index=False)
 
-                            prediction_sort, CUIs_all_covered_sort = zip(*sorted(zip(prediction_all, CUIs_all_covered), reverse=True))
-
-                            CUI_save_all.append(CUIs_all_covered_sort[0:top_N])
-                            score_save_all.append(prediction_sort[0:top_N])
-                            snps_save_all.append(snps)
-                            dic_snp_score[snps] = prediction_sort[0:top_N]
-                            dic_snp_cuis[snps] = CUIs_all_covered_sort[0:top_N]
-
-                            if  snps_num_predict % 10000 == 0 or snps_num_predict == len(snps_all):
-                                CUI_save_all = np.array(CUI_save_all).T
-                                df = pd.DataFrame(CUI_save_all)
-                                df.to_csv(dirr_results + str(snps_num_predict) + "_CUI_" + savename_to_predict, header=snps_save_all, index=False)
-
-                                score_save_all = np.array(score_save_all).T
-                                score_save_all = np.squeeze(score_save_all)
-
-                                df = pd.DataFrame(score_save_all)
-                                df.to_csv(dirr_results + str(snps_num_predict) + "_score_" + savename_to_predict, header=snps_save_all,index=False)
-
-                                np.save(dirr_results + "feature_predicted_snps", np.array(feature_snps_save))
-                                df = pd.DataFrame({})
-                                df["snps"] = snps_all[0:snps_num_predict]
-                                df.to_csv(dirr_results + "snps_names_predicted_snps.csv", index=False)
         train_loss.reset_states()
         train_AUC.reset_states()
         VAE_loss.reset_states()
@@ -1096,7 +1043,6 @@ if __name__ == '__main__':
                  negative_snps=negative_snps,flag_hard_mining=flag_hard_negative,
                  snps_remove=snps_all_un_prediction,flag_debug=flag_debug,
                  flag_negative_filter=flag_negative_filter,flag_cross_gene=flag_cross_gene,flag_cross_cui=flag_cross_cui)
-
 
     print("---loadding data end -----")
     ds_test = tf.data.Dataset.from_tensor_slices(
