@@ -24,6 +24,9 @@ file_gene_save_mapped = "Mapping_snps_genes.csv"
 file_alphamissense_prediction="ClinVar_alphamissense_scores.csv"
 file_PPI_HI="PPI_HI-union.csv"
 file_ENSG_geneName_mapping="ENSG_geneName_mapping.txt"
+file_PPI_HINT_hq="HomoSapiens_binary_hq.txt"
+file_PPI_HINT_htb_hq="HomoSapiens_htb_hq.txt"
+file_PPI_HINT_all="H_sapiens_interfacesALL.txt"
 
 PPI_number_threshold = 10
 test_number = 10000000
@@ -149,12 +152,11 @@ df_LLM=pd.read_csv(dirr+file_disease_embedding_LLM)
 embedding_LLM=np.array(df_LLM[df_LLM.columns[2:]])
 embedding_EHR=np.array(df_ehr[df_ehr.columns[2:]])
 embedding_cui_all=[]
-CUIs = list(pd.read_csv(dirr+file_disease_embedding_LLM)[df.columns[0]])
+CUIs = list(df_LLM[df_LLM.columns[0]])
 for rowi in range(len(CUIs)):
-    cui=CUIs[rowi]
-    if cui in df_ehr:
-        dic_cui_emb[str(CUIs[rowi])] = np.concatenate((np.array(embedding_LLM[rowi]),np.array(embedding_EHR[rowi])),axis=-1)
-        embedding_cui_all.append(np.concatenate((np.array(embedding_LLM[rowi]),np.array(embedding_EHR[rowi])),axis=-1))
+    dic_cui_emb[str(CUIs[rowi])] = np.concatenate((np.array(embedding_LLM[rowi]),np.array(embedding_EHR[rowi])),axis=-1)
+    embedding_cui_all.append(np.concatenate((np.array(embedding_LLM[rowi]),np.array(embedding_EHR[rowi])),axis=-1))
+
 print ("dic_cui_emb len: ",len(dic_cui_emb))
 dic_cui_emb["benign"] = np.min(np.array(embedding_cui_all),axis=0)
 
@@ -297,7 +299,7 @@ for gene in dic_ppi_HiUnion:
 PPI_numbers_HiUnion.sort()
 
 dic_ppi_HINT = {}
-lines = open(dirr + "HomoSapiens_binary_hq.txt").readlines()
+lines = open(dirr + file_PPI_HINT_hq).readlines()
 dic_unipro_gene = {}
 for line in lines[1:]:
     strings = line.strip().split("\t")
@@ -325,7 +327,7 @@ for gene in dic_ppi_HINT:
 PPI_numbers_HINT.sort()
 
 dic_ppi_HINT_HQ = {}
-lines = open(dirr + "HomoSapiens_htb_hq.txt").readlines()
+lines = open(dirr + file_PPI_HINT_htb_hq).readlines()
 for line in lines[1:]:
     strings = line.strip().split("\t")
     gene1 = str(strings[2]).strip()
@@ -349,7 +351,7 @@ PPI_numbers_HINT_HQ.sort()
 dic_ppi_HINT_interface_gene1_gene2 = {}
 dic_ppi_HINT_interface_gene_valid = {}
 dic_ppi_HINT_interface = {}
-lines = open(dirr + "H_sapiens_interfacesALL.txt").readlines()
+lines = open(dirr + file_PPI_HINT_all).readlines()
 
 dic_ppi_HINT_interfac_genes = {}
 dic_ppi_HINT_interfac_position_pairs = {}
@@ -601,7 +603,7 @@ for snp in list(dic_snps_patho.keys())[0:test_number]:
         if len(dic_gene_temp) > 0:
             if gene in dic_gene_temp:
                 for gene_p in dic_gene_temp[gene]:
-                    if gene_p != gene and gene_p in dic_gene_label and gene_p in dic_gene_emb:
+                    if gene_p != gene and gene_p in dic_gene_label and gene_p in dic_gene_emb and gene_p in dic_gene_snps:
                         snps_temp = dic_gene_snps[gene_p]
                         for snp_ii in random.choices(snps_temp, k=20):
                             if snp_ii in snps_patho_all:
@@ -629,7 +631,7 @@ for snp in list(dic_snps_patho.keys())[0:test_number]:
         if len(dic_gene_temp) > 0:
             if gene in dic_gene_temp:
                 for gene_p in dic_gene_temp[gene]:
-                    if gene_p != gene and gene_p in dic_gene_label and gene_p in dic_gene_emb:
+                    if gene_p != gene and gene_p in dic_gene_label and gene_p in dic_gene_emb and gene_p in dic_gene_snps:
                         snps_temp = dic_gene_snps[gene_p]
                         for snp_ii in random.choices(snps_temp, k=20):
                             if snp_ii in snps_patho_all:
@@ -657,7 +659,7 @@ for snp in list(dic_snps_patho.keys())[0:test_number]:
         if len(dic_gene_temp) > 0:
             if gene in dic_gene_temp:
                 for gene_p in dic_gene_temp[gene]:
-                    if gene_p != gene and gene_p in dic_gene_emb:
+                    if gene_p != gene and gene_p in dic_gene_emb and gene_p in dic_gene_snps :
                         snps_temp = dic_gene_snps[gene_p]
                         for snp_ii in random.choices(snps_temp, k=8):
                             if snp_ii in snps_patho_all:
@@ -862,7 +864,7 @@ print("---dic_snp_negative_snps final len---: ", len(dic_snp_negative_snps))
 ############################################getting training data#######################################################
 def loaddata(train_snps_ratio=0.9, negative_disease=10, negative_snps=10, flag_hard_mining=1, negative_num_max=6,
              flag_debug=0, flag_negative_filter=1, similarith_N_threshold_max=0.75, similarith_N_threshold_min=-5.1,
-             flag_cross_gene=0, flag_cross_cui=0):
+     flag_cross_cui=0):
     print("loaddata beginning....")
     weight_ppi_interface = 4.0
     weight_ppi_hint_hq = 0.2
@@ -873,22 +875,9 @@ def loaddata(train_snps_ratio=0.9, negative_disease=10, negative_snps=10, flag_h
     snps_total = list(set(list(dic_snps_cui.keys())))
     snps_total = list(snps_total)
     random.shuffle(snps_total)
-    if flag_cross_gene > 0:
-        genes_total_label = list(dic_gene_label.keys())
-        random.shuffle(genes_total_label)
-        gene_train = genes_total_label[0:int(len(genes_total_label) * train_snps_ratio)]
-        gene_test = genes_total_label[int(len(genes_total_label) * train_snps_ratio):]
-        snps_train = []
-        snps_test = []
-        for snp_i in snps_total:
-            gene_i = dic_snps_gene[snp_i]
-            if gene_i in gene_train:
-                snps_train.append(snp_i)
-            else:
-                snps_test.append(snp_i)
-    else:
-        snps_train = snps_total[0:int(len(snps_total) * train_snps_ratio)]
-        snps_test = snps_total[int(len(snps_total) * train_snps_ratio):]
+
+    snps_train = snps_total[0:int(len(snps_total) * train_snps_ratio)]
+    snps_test = snps_total[int(len(snps_total) * train_snps_ratio):]
 
     cuis_total_label = list(dic_cui_valid.keys())
     if flag_cross_cui > 0:

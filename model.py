@@ -49,7 +49,7 @@ def parse_arguments(parser):
                         help='0-1 to denote if reload the model')
     parser.add_argument('--flag_modelsave', type=int, default=0,
                         help='0-1 to denote if save the model')
-    parser.add_argument('--epochs', type=int, default=60,
+    parser.add_argument('--epochs', type=int, default=10,
                         help='epochs')
     parser.add_argument('--flag_debug', type=int, default=0,
                         help='flag to indicate debug')
@@ -95,8 +95,6 @@ def parse_arguments(parser):
                         help='model name to save ')
     parser.add_argument('--flag_cross_cui', type=int, default=0,
                         help='if flag_cross_cui validation')
-    parser.add_argument('--flag_cross_gene', type=int, default=0,
-                        help='if cross-gene validation')
     parser.add_argument('--content_unlabel', type=str, default="UDN",
                         help='what unlabel SNPs to predict')
     parser.add_argument('--flag_predict', type=int, default=1,
@@ -105,6 +103,8 @@ def parse_arguments(parser):
                         help='Directory of to save results ')
     parser.add_argument('--dirr_save_model', type=str, default="Model_save/",
                         help='Directory of to save models ')
+    parser.add_argument('--dirr_pretrained_model', type=str, default="Model_pretrained/",
+                        help='Directory of to pretrained models ')
     parser.add_argument('--dirr_results', type=str, default="/trait_dim72/",
                         help='Directory to save results including embedings of train/test/unlabelel and unlabled predictions')
     parser.add_argument('--filename_eval', type=str,default="result_trait_dim72.txt",
@@ -127,7 +127,6 @@ weight_CLIP=ARGS.weight_CLIP
 train_ratio=ARGS.train_ratio
 content_unlabel=ARGS.content_unlabel
 flag_negative_filter=ARGS.flag_negative_filter
-flag_cross_gene=ARGS.flag_cross_gene
 flag_cross_cui=ARGS.flag_cross_cui
 negative_disease=ARGS.negative_disease
 negative_snps=ARGS.negative_snps
@@ -141,6 +140,7 @@ flag_debug=ARGS.flag_debug
 model_savename=ARGS.model_savename
 flag_predict=ARGS.flag_predict
 dirr_save_model= ARGS.dirr_save_model
+dirr_pretrained_model=ARGS.dirr_pretrained_model
 dirr_results_main=ARGS.dirr_results_main
 filename_eval=ARGS.filename_eval
 weight_distill=ARGS.weight_distill
@@ -290,10 +290,8 @@ embedding_EHR=np.array(df_ehr[df_ehr.columns[2:]])
 embedding_cui_all=[]
 CUIs = list(pd.read_csv(dirr+file_disease_embedding_LLM)[df.columns[0]])
 for rowi in range(len(CUIs)):
-    cui=CUIs[rowi]
-    if cui in df_ehr:
-        dic_cui_emb[str(CUIs[rowi])] = np.concatenate((np.array(embedding_LLM[rowi]),np.array(embedding_EHR[rowi])),axis=-1)
-        embedding_cui_all.append(np.concatenate((np.array(embedding_LLM[rowi]),np.array(embedding_EHR[rowi])),axis=-1))
+    dic_cui_emb[str(CUIs[rowi])] = np.concatenate((np.array(embedding_LLM[rowi]),np.array(embedding_EHR[rowi])),axis=-1)
+    embedding_cui_all.append(np.concatenate((np.array(embedding_LLM[rowi]),np.array(embedding_EHR[rowi])),axis=-1))
 print ("dic_cui_emb len: ",len(dic_cui_emb))
 dic_cui_emb["benign"] = np.min(np.array(embedding_cui_all),axis=0)
 ########### end readding disease embedding ##################
@@ -1041,17 +1039,16 @@ if __name__ == '__main__':
         os.makedirs(dirr_save_model)
     model = Model_PheMART(latent_dim=latent_dim)
     savename_model =  dirr_save_model+model_savename + "_model"
-    if os.path.exists(savename_model) and flag_reload > 0:
+    if os.path.exists(dirr_pretrained_model) and flag_reload > 0:
         print("---------------------------------------------loadding saved model....................")
-        model = tf.keras.models.load_model(savename_model)
-    print("---loadding data begin-----")
+        model = tf.keras.models.load_model(dirr_pretrained_model)
     (traindata_snps,traindata_cuis,traindata_snps_P,traindata_cuis_P,traindata_gene_P,traindata_Y,traindata_names,
      testdata_cuis,testdata_snps,testdata_Y,testdata_names,test_pair,eval_SNPs,eval_index,
      unlabel_snps,unlabel_gene,unlabel_disease,eval_SNPs_train,eval_cui_train,train_gene,train_gene_ppi_1, train_gene_ppi_2,test_gene,eval_gene_train,eval_gene_test,train_gene_weight,
      traindata_snps_positive,traindata_snps_positive_gene,traindata_snps_negative,traindata_snps_negative_gene,train_gene_PPI_p1_weight)=\
         loaddata(train_snps_ratio=train_ratio,negative_disease=negative_disease,
                  negative_snps=negative_snps,flag_hard_mining=flag_hard_negative,flag_debug=flag_debug,
-                 flag_negative_filter=flag_negative_filter,flag_cross_gene=flag_cross_gene,flag_cross_cui=flag_cross_cui)
+                 flag_negative_filter=flag_negative_filter,flag_cross_cui=flag_cross_cui)
 
     print("---loadding data end -----")
     ds_test = tf.data.Dataset.from_tensor_slices(
