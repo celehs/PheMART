@@ -49,8 +49,8 @@ cd PheMART
 
 ### 2. Create a Virtual Environment (Optional but Recommended)
 ```bash
-python3 -m venv pheMART_env
-source pheMART_env/bin/activate  # On Windows: pheMART_env\Scripts\activate
+conda create -n phemart_env python=3.7.4
+conda activate phemart_env
 ```
 
 ### 3. Install Dependencies
@@ -91,13 +91,13 @@ PheMART requires different input datasets depending on the use case.
 ### Running Inference with Pre-trained Model
 To run inference using our pre-trained model:
 ```bash
-python predict.py --file_snp_prediction variants.csv  --dirr_results_main  result/ --pretrained_model data/model_pretrained/
+python predict.py --file_snp_prediction variants.csv  --dirr_results_main  result/ --dirr_pretrained_model data/model_pretrained/
 ```
 
 #### Arguments
 - `--file_snp_prediction`: File containing the list of variants to predict (CSV).
 - `--dirr_results_main`: Path to save the predictions.
-- `--pretrained_model`: Path to the pre-trained model.
+- `--dirr_pretrained_model`: Path to the pre-trained model.
 
 ---
 
@@ -110,8 +110,8 @@ bash submit.sh --train --file_annotations /path/to/annotations --file_snps_label
 #### Arguments
 - `--train`: Flag to indicate training mode.
 - `--file_annotations`: File containing the annotated variant-phenotype pairs.
-- `--file_annotations`: File containing the list of annotated variants.
-- `--file_annotations`: File containing the embedding vectors of the annotated variants.
+- `--file_snps_labeled`: File containing the list of annotated variants.
+- `--file_snps_labeled_embedding`: File containing the embedding vectors of the annotated variants.
 - `--dirr_results_main`: Path to save result files.
 - `--dirr_save_model`: Path to save the trained model.
 
@@ -121,25 +121,17 @@ bash submit.sh --train --file_annotations /path/to/annotations --file_snps_label
 PheMART generates different outputs depending on the mode of operation.
 
 ### 1. Inference Mode (Using Pre-trained Model)
-- `results_score.csv`: For each variant, contain the ranked scores per their similarities to the phenotypes;
-- `results_CUI.csv`: Contains predicted phenotypes ranked by the their scores to the SNPs.
-- For example, in `results_score.csv`:
+- `variant_ID.csv`: For each variant, the result file contains the scores to the 4,179 phenotypes;
+- For example, in `rs5453.csv`:
   ```
-  NM_002074.5(GNB1):c.388G>A (p.Glu130Lys), NM_003036.4(SKI):c.68A>C (p.Gln23Pro)
-   0.821,0.736
-  0.702,0.625
+  C1321551, 0.532
+  C1535926, 0.125
+  C1321557, 0.021
   ```
-  - For example, in `results_CUI.csv`:
-  ```
-  NM_002074.5(GNB1):c.388G>A (p.Glu130Lys), NM_003036.4(SKI):c.68A>C (p.Gln23Pro)
-   C1321551,C1535926
-  C1321557,C1321632
-  ```
-  - Higher scores indicate a higher likelihood of pathogenicity.
+  - Higher scores indicate a higher likelihood of pathogenicity to the phenotype.
 
 ### 2. Training Mode
-- `training_logs.txt`: Training loss, training performance and hyperparameters.
-- `results_validations.txt`: Model performance on the validation dataset.
+- `results_validations.txt`:  Training loss,hyperparameters, model performance on the validation dataset.
 
 ---
 
