@@ -49,7 +49,7 @@ def parse_arguments(parser):
                         help='files containing list of snps for prediction')
     parser.add_argument('--file_snps_prediction_embedding', type=str, default="snps_prediction_embedding.npy",
                         help='files containing embeddings of snps for prediction')
-    parser.add_argument('--flag_reload', type=int, default=0,
+    parser.add_argument('--flag_reload', type=int, default=1,
                         help='0-1 to denote if reload the model')
     parser.add_argument('--flag_modelsave', type=int, default=0,
                         help='0-1 to denote if save the model')
