@@ -31,12 +31,10 @@ This README provides step-by-step instructions for setting up, running, and inte
 ## System Requirements
 To ensure smooth execution, we recommend the following system specifications:
 
-- **Operating System**: Ubuntu 20.04 / macOS 12+ / Windows Subsystem for Linux (WSL)
-- **Python Version**: 3.8+
-- **GPU (for training)**: NVIDIA GPU with at least 16GB VRAM (e.g., RTX 3090, A100, V100)
+- **Operating System**: Ubuntu 20.04 
+- **Python Version**: 3.7+
+- **GPU (for training)**: NVIDIA GPU with at least 16GB VRAM 
 - **CUDA**: 11.2+
-- **Memory**: Minimum 16GB RAM
-- **Storage**: At least 10GB of free space 
 
 ---
 
