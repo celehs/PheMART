@@ -1,4 +1,4 @@
-# PheMART: Phenotypic Prediction of Missense Variants via Deep Contrastive Learning
+# PheMART: Phenotypic Prediction of Missense Variants
 
 **This repository hosts the official implementation of PheMART, a method that predicts the phenotypic effects of missense variants (MV) via deep contrastive learning.        
 All the source data will be published on: https://doi.org/10.6084/m9.figshare.26036227 and https://doi.org/10.5281/zenodo.13138603.   
